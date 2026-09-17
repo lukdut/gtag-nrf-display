@@ -1,0 +1,751 @@
+#include "gtag_display.h"
+
+#include <cerrno>
+#include <cstring>
+
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/dt-bindings/gpio/nordic-nrf-gpio.h>
+#include <zephyr/kernel.h>
+
+#include <hal/nrf_gpio.h>
+
+#include "esphome/core/application.h"
+#include "esphome/core/hal.h"
+#include "esphome/core/log.h"
+
+namespace esphome {
+namespace gtag_display {
+
+namespace {
+
+static const char *const TAG = "gtag_display";
+
+constexpr uint32_t HALF_US = 2;
+constexpr size_t FRAME_BYTES = 4096;
+
+struct Pin {
+  const struct device *port;
+  gpio_pin_t bit;
+  const char *name;
+};
+
+const Pin PINS[] = {
+    {DEVICE_DT_GET(DT_NODELABEL(gpio0)), 11, "DIO P0.11"},
+    {DEVICE_DT_GET(DT_NODELABEL(gpio1)),  4, "CLK P1.04"},
+    {DEVICE_DT_GET(DT_NODELABEL(gpio1)),  6, "CS P1.06"},
+    {DEVICE_DT_GET(DT_NODELABEL(gpio1)), 13, "RESET P1.13"},
+};
+
+GTagDisplay *instance = nullptr;
+
+// Preserve the already proven UUIDs so the existing HA integration works
+// without any changes.
+#define BT_UUID_GTAG_SERVICE_VAL \
+  BT_UUID_128_ENCODE(0x7a1e0011, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
+#define BT_UUID_GTAG_LED_VAL \
+  BT_UUID_128_ENCODE(0x7a1e0012, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
+#define BT_UUID_GTAG_FRAME_VAL \
+  BT_UUID_128_ENCODE(0x7a1e0013, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
+#define BT_UUID_GTAG_STATUS_VAL \
+  BT_UUID_128_ENCODE(0x7a1e0014, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
+#define BT_UUID_GTAG_CONTROL_VAL \
+  BT_UUID_128_ENCODE(0x7a1e0015, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
+
+#define BT_UUID_GTAG_SERVICE BT_UUID_DECLARE_128(BT_UUID_GTAG_SERVICE_VAL)
+#define BT_UUID_GTAG_LED BT_UUID_DECLARE_128(BT_UUID_GTAG_LED_VAL)
+#define BT_UUID_GTAG_FRAME BT_UUID_DECLARE_128(BT_UUID_GTAG_FRAME_VAL)
+#define BT_UUID_GTAG_STATUS BT_UUID_DECLARE_128(BT_UUID_GTAG_STATUS_VAL)
+#define BT_UUID_GTAG_CONTROL BT_UUID_DECLARE_128(BT_UUID_GTAG_CONTROL_VAL)
+
+uint16_t read_le16(const uint8_t *p) {
+  return uint16_t(p[0]) | (uint16_t(p[1]) << 8);
+}
+
+uint32_t read_le32(const uint8_t *p) {
+  return uint32_t(p[0]) |
+         (uint32_t(p[1]) << 8) |
+         (uint32_t(p[2]) << 16) |
+         (uint32_t(p[3]) << 24);
+}
+
+ssize_t read_led(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                 void *buf, uint16_t len, uint16_t offset) {
+  const uint8_t value =
+      (instance != nullptr && instance->virtual_led()) ? 1 : 0;
+
+  return bt_gatt_attr_read(
+      conn, attr, buf, len, offset, &value, sizeof(value));
+}
+
+ssize_t write_led(struct bt_conn *, const struct bt_gatt_attr *,
+                  const void *buf, uint16_t len, uint16_t offset, uint8_t) {
+  if (offset != 0)
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+
+  if (len != 1)
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+
+  if (instance == nullptr)
+    return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+
+  instance->set_virtual_led(
+      static_cast<const uint8_t *>(buf)[0] != 0);
+
+  return len;
+}
+
+ssize_t write_frame(struct bt_conn *, const struct bt_gatt_attr *,
+                    const void *buf, uint16_t len, uint16_t offset, uint8_t) {
+  if (offset != 0)
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+
+  if (len < 3)
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+
+  const auto *p = static_cast<const uint8_t *>(buf);
+  const uint16_t pos =
+      uint16_t(p[0]) | (uint16_t(p[1]) << 8);
+
+  if (instance == nullptr ||
+      !instance->write_frame_chunk(pos, p + 2, len - 2)) {
+    return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+  }
+
+  return len;
+}
+
+ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                    void *buf, uint16_t len, uint16_t offset) {
+  uint8_t status[8] = {};
+
+  if (instance != nullptr)
+    instance->get_status(status);
+
+  return bt_gatt_attr_read(
+      conn, attr, buf, len, offset, status, sizeof(status));
+}
+
+ssize_t write_control(struct bt_conn *, const struct bt_gatt_attr *,
+                      const void *buf, uint16_t len, uint16_t offset, uint8_t) {
+  if (offset != 0)
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+
+  if (len == 0)
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+
+  if (instance == nullptr)
+    return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+
+  const auto *p = static_cast<const uint8_t *>(buf);
+
+  if (p[0] == 0x01) {
+    frame::Descriptor descriptor{};
+
+    // Protocol-v1 transport-neutral BEGIN descriptor:
+    //
+    // byte 0     : command = 0x01 (BEGIN)
+    // byte 1     : protocol version = 1
+    // byte 2     : codec id (0 RAW, 1 WHITE_RLE_V1)
+    // bytes 3..4 : encoded payload size, little-endian
+    // bytes 5..8 : frame/session id
+    // bytes 9..12: CRC32 of the DECODED 4096-byte framebuffer
+    //
+    // This descriptor is not Bluetooth-specific; BLE is only one adapter.
+    if (len == 13) {
+      descriptor.version = p[1];
+      descriptor.codec = static_cast<frame::Codec>(p[2]);
+      descriptor.encoded_size = read_le16(p + 3);
+      descriptor.frame_id = read_le32(p + 5);
+      descriptor.raw_crc32 = read_le32(p + 9);
+    } else if (len == 9) {
+      // Backward compatibility with the previous reliable BLE sender:
+      // 0x01 | frame_id:u32 | raw_crc32:u32
+      descriptor.version = frame::PROTOCOL_VERSION;
+      descriptor.codec = frame::Codec::RAW;
+      descriptor.encoded_size = frame::RAW_FRAME_SIZE;
+      descriptor.frame_id = read_le32(p + 1);
+      descriptor.raw_crc32 = read_le32(p + 5);
+    } else {
+      return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    const auto result = instance->begin_frame(descriptor);
+
+    return result == frame::BeginResult::REJECTED
+        ? BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED)
+        : len;
+  }
+
+  if (p[0] == 0x02) {
+    if (len != 1)
+      return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+
+    return instance->commit_frame()
+        ? len
+        : BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+  }
+
+  return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+}
+
+BT_GATT_SERVICE_DEFINE(
+    gtag_service,
+
+    BT_GATT_PRIMARY_SERVICE(BT_UUID_GTAG_SERVICE),
+
+    BT_GATT_CHARACTERISTIC(
+        BT_UUID_GTAG_LED,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+        BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+        read_led,
+        write_led,
+        nullptr),
+
+    BT_GATT_CHARACTERISTIC(
+        BT_UUID_GTAG_FRAME,
+        BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+        BT_GATT_PERM_WRITE,
+        nullptr,
+        write_frame,
+        nullptr),
+
+    BT_GATT_CHARACTERISTIC(
+        BT_UUID_GTAG_STATUS,
+        BT_GATT_CHRC_READ,
+        BT_GATT_PERM_READ,
+        read_status,
+        nullptr,
+        nullptr),
+
+    BT_GATT_CHARACTERISTIC(
+        BT_UUID_GTAG_CONTROL,
+        BT_GATT_CHRC_WRITE,
+        BT_GATT_PERM_WRITE,
+        nullptr,
+        write_control,
+        nullptr));
+
+const struct bt_data ad[] = {
+    BT_DATA_BYTES(
+        BT_DATA_FLAGS,
+        BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
+
+    BT_DATA_BYTES(
+        BT_DATA_UUID128_ALL,
+        BT_UUID_GTAG_SERVICE_VAL),
+};
+
+const struct bt_data sd[] = {
+    BT_DATA(
+        BT_DATA_NAME_COMPLETE,
+        CONFIG_BT_DEVICE_NAME,
+        sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+
+void connected_cb(struct bt_conn *, uint8_t err) {
+  ESP_LOGI(TAG, "BLE connection result: 0x%02X", err);
+
+  if (instance != nullptr)
+    instance->connection_changed(err == 0);
+}
+
+void disconnected_cb(struct bt_conn *, uint8_t reason) {
+  ESP_LOGI(TAG, "BLE disconnected: reason=0x%02X", reason);
+
+  if (instance != nullptr)
+    instance->connection_changed(false);
+}
+
+struct bt_conn_cb conn_callbacks = {};
+
+}  // namespace
+
+
+// ---------------------------------------------------------------------------
+// BLE receiver
+// ---------------------------------------------------------------------------
+
+void GTagDisplay::connection_changed(bool connected) {
+  this->connected_.store(connected);
+
+  if (!connected)
+    this->restart_advertising_.store(true);
+}
+
+void GTagDisplay::set_virtual_led(bool state) {
+  this->virtual_led_.store(state);
+  ESP_LOGI(TAG, "Virtual test LED = %s", state ? "ON" : "OFF");
+}
+
+frame::BeginResult GTagDisplay::begin_frame(
+    const frame::Descriptor &descriptor) {
+
+  const auto result = this->receiver_.begin(descriptor);
+
+  ESP_LOGI(
+      TAG,
+      "BEGIN %s: proto=%u codec=%u encoded=%u id=%08X received=%u raw_crc=%08X",
+      result == frame::BeginResult::NEW_SESSION
+          ? "new"
+          : result == frame::BeginResult::RESUMED
+                ? "resume"
+                : "rejected",
+      unsigned(descriptor.version),
+      unsigned(static_cast<uint8_t>(descriptor.codec)),
+      unsigned(descriptor.encoded_size),
+      unsigned(descriptor.frame_id),
+      unsigned(this->receiver_.received()),
+      unsigned(descriptor.raw_crc32));
+
+  return result;
+}
+
+bool GTagDisplay::write_frame_chunk(
+    uint16_t offset,
+    const uint8_t *data,
+    size_t len) {
+
+  const auto before = this->receiver_.received();
+  const bool ok = this->receiver_.write(offset, data, len);
+
+  if (!ok) {
+    ESP_LOGW(
+        TAG,
+        "DATA rejected: offset=%u len=%u expected=%u encoded_total=%u state=%u error=%u",
+        unsigned(offset),
+        unsigned(len),
+        unsigned(before),
+        unsigned(this->receiver_.encoded_size()),
+        unsigned(static_cast<uint8_t>(this->receiver_.state())),
+        unsigned(static_cast<uint8_t>(this->receiver_.error())));
+  }
+
+  return ok;
+}
+
+bool GTagDisplay::commit_frame() {
+  if (!this->receiver_.commit(
+          this->display_frame_.data(),
+          this->display_frame_.size())) {
+
+    ESP_LOGW(
+        TAG,
+        "COMMIT rejected: received=%u/%u codec=%u state=%u error=%u raw_crc=%08X",
+        unsigned(this->receiver_.received()),
+        unsigned(this->receiver_.encoded_size()),
+        unsigned(static_cast<uint8_t>(this->receiver_.codec())),
+        unsigned(static_cast<uint8_t>(this->receiver_.state())),
+        unsigned(static_cast<uint8_t>(this->receiver_.error())),
+        unsigned(this->receiver_.actual_raw_crc32()));
+
+    return false;
+  }
+
+  this->frame_pending_.store(true);
+
+  ESP_LOGI(
+      TAG,
+      "Frame decoded+verified: encoded=%u raw=4096 codec=%u CRC32=%08X; queued for LCD",
+      unsigned(this->receiver_.encoded_size()),
+      unsigned(static_cast<uint8_t>(this->receiver_.codec())),
+      unsigned(this->receiver_.actual_raw_crc32()));
+
+  return true;
+}
+
+
+bool GTagDisplay::start_advertising_() {
+  const int err = bt_le_adv_start(
+      BT_LE_ADV_CONN,
+      ad,
+      ARRAY_SIZE(ad),
+      sd,
+      ARRAY_SIZE(sd));
+
+  if (err == 0 || err == -EALREADY) {
+    ESP_LOGI(TAG, "BLE advertising ready");
+    return true;
+  }
+
+  ESP_LOGW(TAG, "Advertising failed: %d; retry in 1s", err);
+  return false;
+}
+
+
+// ---------------------------------------------------------------------------
+// LCD — intentionally kept equivalent to proven LCD3-DIRECT-01/v36.
+// ---------------------------------------------------------------------------
+
+void GTagDisplay::wait_(Stage next, uint32_t delay_ms) {
+  this->stage_ = next;
+  this->next_ms_ = k_uptime_get_32() + delay_ms;
+}
+
+bool GTagDisplay::configure_pins_() {
+  for (unsigned i = 0; i < 4; ++i) {
+    if (!device_is_ready(PINS[i].port)) {
+      ESP_LOGE(TAG, "LCD GPIO device not ready: %s", PINS[i].name);
+      return false;
+    }
+  }
+
+  const Signal order[] = {
+      Signal::CS,
+      Signal::RESET,
+      Signal::SCLK,
+      Signal::DIO,
+  };
+
+  for (const Signal signal : order) {
+    const auto &pin = PINS[static_cast<unsigned>(signal)];
+    const bool high =
+        signal == Signal::CS || signal == Signal::RESET;
+
+    gpio_flags_t flags =
+        GPIO_INPUT |
+        (high ? GPIO_OUTPUT_HIGH : GPIO_OUTPUT_LOW);
+
+    if (signal == Signal::SCLK || signal == Signal::DIO)
+      flags |= NRF_GPIO_DRIVE_S0H1;
+
+    const int rc =
+        gpio_pin_configure(pin.port, pin.bit, flags);
+
+    if (rc != 0) {
+      ESP_LOGE(
+          TAG,
+          "LCD CONFIG %s failed rc=%d",
+          pin.name,
+          rc);
+
+      return false;
+    }
+
+    ESP_LOGI(TAG, "LCD CONFIG %s rc=0", pin.name);
+  }
+
+  this->pins_configured_ = true;
+  return true;
+}
+
+bool GTagDisplay::write_(Signal signal, bool high) {
+  switch (signal) {
+    case Signal::DIO:
+      if (high)
+        NRF_P0->OUTSET = BIT(11);
+      else
+        NRF_P0->OUTCLR = BIT(11);
+      break;
+
+    case Signal::SCLK:
+      if (high)
+        NRF_P1->OUTSET = BIT(4);
+      else
+        NRF_P1->OUTCLR = BIT(4);
+      break;
+
+    case Signal::CS:
+      if (high)
+        NRF_P1->OUTSET = BIT(6);
+      else
+        NRF_P1->OUTCLR = BIT(6);
+      break;
+
+    case Signal::RESET:
+      if (high)
+        NRF_P1->OUTSET = BIT(13);
+      else
+        NRF_P1->OUTCLR = BIT(13);
+      break;
+  }
+
+  return true;
+}
+
+bool GTagDisplay::reset_pulse_() {
+  ++this->resets_;
+
+  this->write_(Signal::CS, true);
+  this->write_(Signal::SCLK, false);
+  this->write_(Signal::DIO, false);
+
+  this->write_(Signal::RESET, false);
+  k_busy_wait(50);
+  this->write_(Signal::RESET, true);
+
+  ESP_LOGI(
+      TAG,
+      "LCD RESET #%u LOW 50us -> HIGH",
+      static_cast<unsigned>(this->resets_));
+
+  return true;
+}
+
+bool GTagDisplay::word_(bool is_data, uint8_t byte) {
+  this->write_(Signal::SCLK, false);
+  this->write_(Signal::CS, false);
+  k_busy_wait(HALF_US);
+
+  const uint16_t value =
+      uint16_t(is_data ? 0x100U : 0U) | byte;
+
+  for (int bit = 8; bit >= 0; --bit) {
+    this->write_(
+        Signal::DIO,
+        ((value >> bit) & 1U) != 0);
+
+    k_busy_wait(HALF_US);
+
+    this->write_(Signal::SCLK, true);
+    k_busy_wait(HALF_US);
+    this->write_(Signal::SCLK, false);
+  }
+
+  k_busy_wait(HALF_US);
+  this->write_(Signal::CS, true);
+  k_busy_wait(HALF_US);
+
+  ++this->words_;
+  return true;
+}
+
+bool GTagDisplay::address_(uint16_t address) {
+  return
+      this->word_(false, 0x2A) &&
+      this->word_(true, uint8_t(address >> 8)) &&
+      this->word_(true, uint8_t(address));
+}
+
+bool GTagDisplay::clear_ram_() {
+  if (!this->word_(false, 0x11))
+    return false;
+
+  for (uint16_t base = 0; base < FRAME_BYTES; base += 256) {
+    if (!this->address_(base) ||
+        !this->word_(false, 0x2C)) {
+      return false;
+    }
+
+    for (unsigned j = 0; j < 256; ++j) {
+      if (!this->word_(true, 0xFF))
+        return false;
+    }
+
+    App.feed_wdt();
+  }
+
+  return this->write_(Signal::DIO, false);
+}
+
+bool GTagDisplay::send_frame_(const uint8_t *frame) {
+  if (frame == nullptr)
+    return false;
+
+  ESP_LOGI(TAG, "LCD FRAME begin");
+
+  const uint32_t started = k_uptime_get_32();
+  const uint32_t old_words = this->words_;
+
+  if (!this->address_(0) ||
+      !this->word_(false, 0x2C)) {
+    return false;
+  }
+
+  for (size_t i = 0; i < FRAME_BYTES; ++i) {
+    if (!this->word_(true, frame[i]))
+      return false;
+
+    if ((i & 0xFFU) == 0xFFU)
+      App.feed_wdt();
+  }
+
+  this->write_(Signal::DIO, false);
+
+  ++this->frames_;
+
+  ESP_LOGI(
+      TAG,
+      "LCD FRAME TX_DONE bytes=4096 words=%u ms=%u frame_no=%u",
+      static_cast<unsigned>(this->words_ - old_words),
+      static_cast<unsigned>(k_uptime_get_32() - started),
+      static_cast<unsigned>(this->frames_));
+
+  return true;
+}
+
+void GTagDisplay::service_lcd_() {
+  const uint32_t now = k_uptime_get_32();
+
+  if (this->stage_ != Stage::READY) {
+    if (int32_t(now - this->next_ms_) < 0)
+      return;
+
+    switch (this->stage_) {
+      case Stage::BOOT_WAIT:
+        this->reset_pulse_();
+        ESP_LOGI(
+            TAG,
+            "LCD wait 50ms AFTER RESET; stock XCLK");
+        this->wait_(Stage::AFTER_RESET, 50);
+        return;
+
+      case Stage::AFTER_RESET:
+        ESP_LOGI(TAG, "LCD INIT 0x11 + RAM clear");
+
+        if (!this->clear_ram_())
+          return;
+
+        this->wait_(Stage::AFTER_CLEAR, 10);
+        return;
+
+      case Stage::AFTER_CLEAR:
+        this->word_(false, 0x4C);
+        this->word_(true, 0x0C);
+        this->word_(true, 0x00);
+        this->word_(true, 0x00);
+        this->word_(true, 0x00);
+
+        this->wait_(Stage::AFTER_4C, 4);
+        return;
+
+      case Stage::AFTER_4C:
+        this->word_(false, 0x4D);
+        this->word_(true, 0xFF);
+        this->word_(true, 0x00);
+        this->word_(true, 0x7F);
+
+        this->wait_(Stage::AFTER_4D, 1);
+        return;
+
+      case Stage::AFTER_4D:
+        this->word_(false, 0x4E);
+        this->word_(true, 0x60);
+
+        ESP_LOGI(TAG, "LCD INIT_SENT; wait 500ms");
+        this->wait_(Stage::AFTER_4E, 500);
+        return;
+
+      case Stage::AFTER_4E:
+        this->stage_ = Stage::READY;
+        ESP_LOGI(
+            TAG,
+            "LCD READY; waiting for verified BLE frame");
+        break;
+
+      case Stage::READY:
+        break;
+    }
+  }
+
+  // The HA v0.4 sender verifies STATUS and then disconnects. Rendering only
+  // after disconnect keeps the proven v36 LCD timing away from active GATT
+  // traffic and avoids a new client racing the framebuffer copy.
+  if (this->stage_ == Stage::READY &&
+      !this->connected_.load() &&
+      this->frame_pending_.exchange(false)) {
+
+    this->restart_advertising_.store(false);
+
+    if (!this->send_frame_(this->display_frame_.data())) {
+      ESP_LOGE(TAG, "LCD frame render failed");
+      this->frame_pending_.store(true);
+    } else {
+      ESP_LOGI(TAG, "BLE frame rendered on LCD");
+    }
+
+    // Advertise again only after the ~235 ms LCD burst is complete.
+    this->restart_advertising_.store(true);
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Component lifecycle
+// ---------------------------------------------------------------------------
+
+void GTagDisplay::setup() {
+  instance = this;
+
+  ESP_LOGI(
+      TAG,
+      "GTag BLE+LCD v2: transport-neutral frame protocol v1 + proven LCD3-DIRECT-01");
+
+  if (!this->configure_pins_()) {
+    this->mark_failed();
+    return;
+  }
+
+  const int err = bt_enable(nullptr);
+
+  if (err != 0 && err != -EALREADY) {
+    ESP_LOGE(TAG, "bt_enable failed: %d", err);
+    this->mark_failed();
+    return;
+  }
+
+  conn_callbacks.connected = connected_cb;
+  conn_callbacks.disconnected = disconnected_cb;
+  bt_conn_cb_register(&conn_callbacks);
+
+  this->restart_advertising_.store(true);
+
+  // Preserve the initial v36 boot wait before RESET.
+  this->wait_(Stage::BOOT_WAIT, 3000);
+
+  ESP_LOGI(TAG, "Bluetooth initialized; LCD startup scheduled");
+}
+
+void GTagDisplay::loop() {
+  if (this->is_failed())
+    return;
+
+  // If a committed frame is waiting after disconnect, render it before
+  // restarting advertising. This keeps LCD SPI isolated from GATT traffic.
+  this->service_lcd_();
+
+  const uint32_t now = millis();
+
+  if (this->restart_advertising_.load() &&
+      !this->connected_.load() &&
+      !this->frame_pending_.load() &&
+      int32_t(now - this->next_advertising_attempt_) >= 0) {
+
+    this->restart_advertising_.store(false);
+
+    if (!this->start_advertising_())
+      this->restart_advertising_.store(true);
+
+    this->next_advertising_attempt_ = now + 1000;
+  }
+}
+
+void GTagDisplay::dump_config() {
+  ESP_LOGCONFIG(
+      TAG,
+      "GTag BLE+LCD v2; protocol-v1 codecs RAW/WHITE_RLE_V1; UUIDs 0011..0015");
+
+  ESP_LOGCONFIG(
+      TAG,
+      "  LCD: DIO=P0.11 CLK=P1.04 CS=P1.06 RESET=P1.13");
+
+  ESP_LOGCONFIG(
+      TAG,
+      "  LCD timing: HALF_US=%u; direct OUTSET/OUTCLR; stock XCLK",
+      unsigned(HALF_US));
+
+#ifdef CONFIG_BT_CTLR_TX_PWR_DBM
+  ESP_LOGCONFIG(
+      TAG,
+      "  Bluetooth controller TX power: %d dBm",
+      CONFIG_BT_CTLR_TX_PWR_DBM);
+#endif
+}
+
+}  // namespace gtag_display
+}  // namespace esphome

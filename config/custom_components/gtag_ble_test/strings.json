@@ -1,0 +1,21 @@
+{
+  "title": "GTag BLE Test",
+  "config": {
+    "step": {
+      "confirm": {
+        "title": "Add {name}?",
+        "description": "Add the nRF52840 GATT test device."
+      },
+      "user": {
+        "title": "Select device",
+        "data": {
+          "address": "Device"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Already configured.",
+      "no_devices_found": "No GTag BLE devices found."
+    }
+  }
+}

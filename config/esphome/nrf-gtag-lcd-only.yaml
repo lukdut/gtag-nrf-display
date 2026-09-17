@@ -1,0 +1,65 @@
+esphome:
+  name: nrf-gtag-lcd-only
+  includes:
+    - gtag_lcd_local.h
+  on_boot:
+    priority: -100
+    then:
+      - lambda: lcd_local::setup();
+      - delay: 5s
+      - script.execute: lcd_test_cycle
+
+nrf52:
+  board: adafruit_itsybitsy_nrf52840
+  bootloader: adafruit_nrf52_sd140_v6
+  dcdc: false
+
+logger:
+  level: INFO
+
+# This is the LCD-only diagnostic, not the BLE firmware.
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [lcd_gpio_guard]
+
+lcd_gpio_guard:
+
+script:
+  - id: lcd_test_cycle
+    mode: single
+    then:
+      - while:
+          condition:
+            lambda: return true;
+          then:
+            - lambda: lcd_local::begin_cycle();
+            - if:
+                condition:
+                  lambda: return lcd_local::healthy();
+                then:
+                  # RESET pulse (50 us) is issued in begin_cycle().
+                  # All longer waits are ESPHome delays, not busy loops.
+                  - delay: 50ms
+                  - lambda: lcd_local::wake_and_clear();
+                  - delay: 10ms
+                  - lambda: lcd_local::config_4c();
+                  - delay: 4ms
+                  - lambda: lcd_local::config_4d();
+                  - delay: 1ms
+                  - lambda: lcd_local::config_4e();
+                  - delay: 500ms
+                  - lambda: lcd_local::show(lcd_local::Pattern::WHITE);
+                  - delay: 5s
+                  - lambda: lcd_local::show(lcd_local::Pattern::BLACK);
+                  - delay: 5s
+                  - lambda: lcd_local::show(lcd_local::Pattern::CHECKERBOARD);
+                  - delay: 5s
+                  - lambda: lcd_local::show(lcd_local::Pattern::STRIPES);
+                  - delay: 5s
+                else:
+                  - logger.log:
+                      level: ERROR
+                      format: "LCD-LOCAL-02: GPIO readback failed; no LCD commands this cycle"
+            - delay: 3s

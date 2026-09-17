@@ -1,0 +1,15 @@
+{
+  "domain": "gtag_ble_test",
+  "name": "GTag Display",
+  "version": "0.3.0",
+  "config_flow": true,
+  "dependencies": [
+    "bluetooth"
+  ],
+  "iot_class": "local_push",
+  "bluetooth": [
+    {
+      "service_uuid": "7a1e0011-6b5b-4f6d-8d6e-0f4f47544147"
+    }
+  ]
+}
