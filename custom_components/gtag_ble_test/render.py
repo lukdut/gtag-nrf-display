@@ -95,8 +95,10 @@ def from_raw(raw: bytes) -> RenderedFrame:
 def preview_svg(raw: bytes) -> str:
     """A pixel-exact inline preview for HA's SVG-enabled options dialog.
 
-    Use paths, not data: URLs (the HA options dialog blocks those). The output
-    contains only framebuffer pixels, never user text or external resources.
+    HA's Markdown filter allows svg width/height and path d/stroke, but strips
+    rect, fill, viewBox and styles. Draw one-pixel strokes at pixel centres,
+    including an opaque white background, using explicit native dimensions.
+    The output contains only pixels, never user text or external resources.
     """
     if len(raw) != WIDTH * HEIGHT // 8:
         raise ValueError("A framebuffer must contain exactly 4096 bytes")
@@ -110,11 +112,11 @@ def preview_svg(raw: bytes) -> str:
             start = x
             while x < WIDTH and not raw[y * 32 + x // 8] & (1 << (x % 8)):
                 x += 1
-            paths.append(f"M{start} {y}h{x - start}v1h{start - x}z")
-    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 128" '
-            'width="100%" role="img" shape-rendering="crispEdges">'
-            '<rect width="256" height="128" fill="white"/>'
-            '<path fill="black" d="' + "".join(paths) + '"/></svg>')
+            paths.append(f"M{start} {y}.5h{x - start}")
+    background = "".join(f"M0 {y}.5h{WIDTH}" for y in range(HEIGHT))
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}">'
+            '<path stroke="white" d="' + background + '"/>'
+            '<path stroke="black" d="' + "".join(paths) + '"/></svg>')
 
 
 def _icon(draw: ImageDraw.ImageDraw, item: dict[str, Any], color: int) -> None:

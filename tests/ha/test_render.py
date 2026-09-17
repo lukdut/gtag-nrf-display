@@ -60,14 +60,15 @@ def test_multiline_text_keeps_alignment_and_line_spacing():
 def test_preview_paths_match_every_display_pixel():
     frame = render_layout(clock_layout(datetime(2026, 9, 17, 12, 34)))
     root = ElementTree.fromstring(preview_svg(frame.raw))
-    paths = root.find("{http://www.w3.org/2000/svg}path").attrib["d"]
-    reconstructed = bytearray(b"\xff" * 4096)
-    for x, y, length, back in re.findall(r"M(\d+) (\d+)h(\d+)v1h-(\d+)z", paths):
-        x, y, length = int(x), int(y), int(length)
-        assert int(back) == length
-        for offset in range(x, x + length):
-            reconstructed[y * 32 + offset // 8] &= ~(1 << (offset % 8))
-    assert bytes(reconstructed) == frame.raw
+    # Start transparent: the SVG itself must paint every background pixel.
+    reconstructed = Image.new("RGBA", (256, 128))
+    for path in root.findall("{http://www.w3.org/2000/svg}path"):
+        color = (255, 255, 255, 255) if path.attrib["stroke"] == "white" else (0, 0, 0, 255)
+        for x, y, length in re.findall(r"M(\d+) (\d+)\.5h(\d+)", path.attrib["d"]):
+            x, y, length = int(x), int(y), int(length)
+            for offset in range(x, x + length):
+                reconstructed.putpixel((offset, y), color)
+    assert reconstructed.tobytes() == Image.open(BytesIO(frame.png)).convert("RGBA").tobytes()
 
 
 def test_long_text_fits_its_column():
