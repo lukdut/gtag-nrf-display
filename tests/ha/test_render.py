@@ -1,11 +1,13 @@
 from datetime import datetime
 from io import BytesIO
+import re
+from xml.etree import ElementTree
 
 from PIL import Image
 import pytest
 import voluptuous as vol
 
-from custom_components.gtag_ble_test.render import ICONS, clock_layout, from_raw, render_layout
+from custom_components.gtag_ble_test.render import ICONS, clock_layout, from_raw, preview_svg, render_layout
 
 
 def test_pixel_packing_matches_lcd_and_preview():
@@ -53,6 +55,29 @@ def test_multiline_text_keeps_alignment_and_line_spacing():
         {**base, "text": "Две"}, {**base, "y": 30, "text": "строки"},
     ]})
     assert combined == separate
+
+
+def test_preview_paths_match_every_display_pixel():
+    frame = render_layout(clock_layout(datetime(2026, 9, 17, 12, 34)))
+    root = ElementTree.fromstring(preview_svg(frame.raw))
+    paths = root.find("{http://www.w3.org/2000/svg}path").attrib["d"]
+    reconstructed = bytearray(b"\xff" * 4096)
+    for x, y, length, back in re.findall(r"M(\d+) (\d+)h(\d+)v1h-(\d+)z", paths):
+        x, y, length = int(x), int(y), int(length)
+        assert int(back) == length
+        for offset in range(x, x + length):
+            reconstructed[y * 32 + offset // 8] &= ~(1 << (offset % 8))
+    assert bytes(reconstructed) == frame.raw
+
+
+def test_long_text_fits_its_column():
+    frame = render_layout({"elements": [{
+        "type": "text", "x": 8, "y": 8, "text": "Очень длинная подпись " * 20,
+        "size": 32, "max_width": 100,
+    }]})
+    image = Image.open(BytesIO(frame.png))
+    assert image.crop((8, 8, 108, 48)).getextrema() == (0, 255)
+    assert image.crop((108, 0, 256, 128)).getextrema() == (255, 255)
 
 
 @pytest.mark.parametrize("layout", [

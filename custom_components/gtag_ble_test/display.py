@@ -22,7 +22,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .frame_protocol import PreparedFrame
-from .render import LAYOUT_SCHEMA, RenderedFrame, clock_layout, from_raw, render_layout
+from .layouts import async_render_layout, preset_layout, validate_settings
+from .render import LAYOUT_SCHEMA, RenderedFrame, clock_layout, from_raw
 from .transport import FrameSender, connect, get_operation_lock
 
 _LOGGER = logging.getLogger(__name__)
@@ -60,19 +61,53 @@ class Display:
         self._clock_unsubscribe: Callable[[], None] | None = None
         self._template_tracker = None
         self._pending: DrawRequest | None = None
+        self._pending_since = 0.0
         self._worker: asyncio.Task | None = None
+        self._queue_changed = asyncio.Event()
         self._intent_lock = asyncio.Lock()
         self._closed = False
         self._last_frame: bytes | None = None
         self._last_success_time = float("-inf")
         self._last_attempt_end = float("-inf")
+        self._entry_options = entry.options
+        self._options_revision = None
+        self._configured_interval = entry.options.get("screen", {}).get("update_interval")
+
+    @property
+    def update_interval(self) -> float:
+        return (max(MIN_UPDATE_INTERVAL, float(self._configured_interval))
+                if self._configured_interval is not None else MIN_UPDATE_INTERVAL)
+
+    def _select_settings(self, settings: dict[str, Any], revision: str) -> None:
+        settings = validate_settings(settings)
+        self._stop_clock()
+        self._stop_watching()
+        self._configured_interval = settings["update_interval"]
+        self._options_revision = revision
+        self.clock_enabled = settings["preset"] == "clock"
+        self.auto_update = True
+        self.last_layout = None if self.clock_enabled else preset_layout(settings)
+
+    async def async_apply_settings(self, settings: dict[str, Any], revision: str) -> None:
+        async with self._intent_lock:
+            if self._closed or revision == self._options_revision:
+                return
+            self._select_settings(settings, revision)
+            await self._save()
+            if self.clock_enabled:
+                self._start_clock()
+                result = self._enqueue("clock", None, True)
+            else:
+                self._watch_layout()
+                result = self._enqueue("layout", deepcopy(self.last_layout), True)
+        await asyncio.shield(result)
 
     async def async_load(self) -> None:
-        if not (saved := await self._store.async_load()):
-            return
+        saved = await self._store.async_load() or {}
         if not isinstance(saved, dict):
             _LOGGER.warning("%s: ignoring invalid saved display settings", self.address)
-            return
+            saved = {}
+        self._options_revision = saved.get("options_revision")
         self.clock_enabled = saved.get("clock_enabled", False) is True
         self.auto_update = saved.get("auto_update", True) is True
         if saved.get("layout") is not None:
@@ -80,6 +115,13 @@ class Display:
                 self.last_layout = self._validate_layout(saved["layout"])
             except (vol.Invalid, HomeAssistantError, TypeError) as err:
                 _LOGGER.warning("%s: ignoring invalid saved layout: %s", self.address, err)
+        # Recover an options save even if HA stopped before its update listener
+        # could apply it. A later draw action remains active across restarts.
+        if (settings := self._entry_options.get("screen")) and (
+            (revision := self._entry_options.get("screen_revision")) != self._options_revision
+        ):
+            self._select_settings(settings, revision)
+            await self._save()
 
     def _validate_layout(self, layout: dict[str, Any]) -> dict[str, Any]:
         layout = LAYOUT_SCHEMA(layout)
@@ -92,6 +134,7 @@ class Display:
         await self._store.async_save({
             "clock_enabled": self.clock_enabled, "layout": self.last_layout,
             "auto_update": self.auto_update,
+            "options_revision": self._options_revision,
         })
 
     @callback
@@ -162,6 +205,7 @@ class Display:
         if self._pending is not None and self._pending.mode == "clock":
             self._resolve(self._pending, {"status": "superseded"})
             self._pending = None
+            self._queue_changed.set()
             if self.status == "queued":
                 self.status = "sent" if self.last_success else "idle"
 
@@ -226,7 +270,10 @@ class Display:
         result.add_done_callback(lambda done: None if done.cancelled() else done.exception())
         if self._pending is not None:
             self._resolve(self._pending, {"status": "superseded"})
+        else:
+            self._pending_since = self.hass.loop.time()
         self._pending = DrawRequest(mode, content, force, result)
+        self._queue_changed.set()
         if self.status != "sending":
             self.status = "queued"
         self._notify()
@@ -249,21 +296,24 @@ class Display:
         if request.mode == "raw":
             return await self.hass.async_add_executor_job(from_raw, request.content)
         layout = clock_layout(dt_util.now()) if request.mode == "clock" else deepcopy(request.content)
-        # Resolve HA state/time templates in the event loop; Pillow and disk I/O
-        # run below in the executor. Automations may also render templates first.
-        for element in layout["elements"]:
-            if element["type"] == "text":
-                element["text"] = Template(element["text"], self.hass).async_render(
-                    parse_result=False,
-                )
-        return await self.hass.async_add_executor_job(render_layout, layout)
+        return await async_render_layout(self.hass, layout)
 
     async def _run_queue(self) -> None:
         try:
             while self._pending is not None and not self._closed:
-                delay = max(COALESCE_SECONDS,
-                            self._last_attempt_end + MIN_UPDATE_INTERVAL - self.hass.loop.time())
-                await asyncio.sleep(delay)
+                now = self.hass.loop.time()
+                delay = max(0, self._pending_since + COALESCE_SECONDS - now,
+                            self._last_attempt_end + self.update_interval - now)
+                self._queue_changed.clear()
+                if delay > 0:
+                    try:
+                        await asyncio.wait_for(self._queue_changed.wait(), delay)
+                    except TimeoutError:
+                        pass
+                    else:
+                        continue  # Recalculate after newer content or interval settings.
+                else:
+                    await asyncio.sleep(0)
                 request, self._pending = self._pending, None
                 if request is None:
                     continue

@@ -5,7 +5,7 @@ import sys
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "config"))
+sys.path.insert(0, str(ROOT))
 
 from custom_components.gtag_ble_test import display as display_module
 from custom_components.gtag_ble_test.const import DOMAIN

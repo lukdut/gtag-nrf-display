@@ -8,9 +8,10 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
-    config = root / "config"
-    component = config / "custom_components" / "gtag_ble_test"
-    for required in ("manifest.json", "services.yaml", "fonts/DejaVuSans.ttf", "fonts/LICENSE.txt"):
+    component = root / "custom_components" / "gtag_ble_test"
+    for required in ("manifest.json", "services.yaml", "layouts.py",
+                     "fonts/DejaVuSans.ttf", "fonts/LICENSE.txt",
+                     "translations/en.json", "translations/ru.json", "brand/icon.png"):
         if not (component / required).is_file():
             raise SystemExit(f"Missing required package file: {required}")
     dist = root / "dist"
@@ -19,10 +20,10 @@ def main() -> None:
     temporary = archive.with_suffix(".zip.tmp")
     files = sorted(path for path in component.rglob("*")
                    if path.is_file() and "__pycache__" not in path.parts
-                   and path.suffix in {".py", ".json", ".yaml", ".ttf", ".txt"})
+                   and path.suffix in {".py", ".json", ".yaml", ".ttf", ".txt", ".png"})
     with ZipFile(temporary, "w", ZIP_DEFLATED, compresslevel=9) as output:
         for path in files:
-            output.write(path, path.relative_to(config).as_posix())
+            output.write(path, path.relative_to(root).as_posix())
     temporary.replace(archive)
     artifacts = [archive]
     if (firmware := dist / "gtag-display.uf2").is_file():

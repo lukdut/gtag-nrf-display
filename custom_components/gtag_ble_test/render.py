@@ -41,6 +41,7 @@ TEXT_SCHEMA = vol.Schema({
     vol.Required("text"): vol.All(vol.Any(str, int, float), vol.Coerce(str), vol.Length(max=1024)),
     vol.Optional("size", default=20): vol.All(int, vol.Range(min=8, max=64)),
     vol.Optional("align", default="left"): vol.In(("left", "center", "right")),
+    vol.Optional("max_width"): vol.All(int, vol.Range(min=1, max=WIDTH)),
 })
 LINE_SCHEMA = vol.Schema({
     **BASE,
@@ -91,6 +92,31 @@ def from_raw(raw: bytes) -> RenderedFrame:
     return RenderedFrame(raw, _png(image))
 
 
+def preview_svg(raw: bytes) -> str:
+    """A pixel-exact inline preview for HA's SVG-enabled options dialog.
+
+    Use paths, not data: URLs (the HA options dialog blocks those). The output
+    contains only framebuffer pixels, never user text or external resources.
+    """
+    if len(raw) != WIDTH * HEIGHT // 8:
+        raise ValueError("A framebuffer must contain exactly 4096 bytes")
+    paths = []
+    for y in range(HEIGHT):
+        x = 0
+        while x < WIDTH:
+            if raw[y * 32 + x // 8] & (1 << (x % 8)):
+                x += 1
+                continue
+            start = x
+            while x < WIDTH and not raw[y * 32 + x // 8] & (1 << (x % 8)):
+                x += 1
+            paths.append(f"M{start} {y}h{x - start}v1h{start - x}z")
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 128" '
+            'width="100%" role="img" shape-rendering="crispEdges">'
+            '<rect width="256" height="128" fill="white"/>'
+            '<path fill="black" d="' + "".join(paths) + '"/></svg>')
+
+
 def _icon(draw: ImageDraw.ImageDraw, item: dict[str, Any], color: int) -> None:
     x, y, size = item["x"], item["y"], item["size"]
     width = max(1, size // 12)
@@ -136,12 +162,23 @@ def render_layout(layout: dict[str, Any]) -> RenderedFrame:
         kind = item["type"]
         if kind == "text":
             size = item["size"]
-            if size not in fonts:
-                fonts[size] = ImageFont.truetype(str(FONT_PATH), size=size)
+            lines = item["text"].split("\n")
+            limit = item.get("max_width")
+            while True:
+                if size not in fonts:
+                    fonts[size] = ImageFont.truetype(str(FONT_PATH), size=size)
+                font = fonts[size]
+                if limit is None or size <= 8 or all(font.getlength(line) <= limit for line in lines):
+                    break
+                size -= 1
             anchor = {"left": "lt", "center": "mt", "right": "rt"}[item["align"]]
-            for index, line in enumerate(item["text"].split("\n")):
+            for index, line in enumerate(lines):
+                if limit is not None and font.getlength(line) > limit:
+                    while line and font.getlength(line + "…") > limit:
+                        line = line[:-1]
+                    line = line + "…" if font.getlength("…") <= limit else ""
                 draw.text((item["x"], item["y"] + index * (size + 2)), line,
-                          font=fonts[size], fill=color, anchor=anchor)
+                          font=font, fill=color, anchor=anchor)
         elif kind in ("line", "rectangle"):
             coords = (item["x"], item["y"], item["x2"], item["y2"])
             if kind == "line":

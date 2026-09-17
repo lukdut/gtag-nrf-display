@@ -1,0 +1,71 @@
+{
+  "title": "GTag Display",
+  "config": {
+    "step": {
+      "confirm": {
+        "title": "Add {name}?",
+        "description": "Add the G-Tag display connected through nRF52840."
+      },
+      "user": {
+        "title": "Select device",
+        "data": {
+          "address": "Device"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Already configured.",
+      "no_devices_found": "No GTag BLE devices found."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Screen layout",
+        "description": "Choose a layout. You can preview it before applying.",
+        "data": {
+          "preset": "Layout",
+          "update_interval": "Minimum update interval"
+        },
+        "data_description": {
+          "update_interval": "Minimum pause between transfers, in seconds. Values update when their entities change; the clock updates once a minute. A longer pause reduces update frequency."
+        }
+      },
+      "values": {
+        "title": "Display values",
+        "description": "Choose the information to display. Empty labels and units use the entity's own name and unit.",
+        "data": {
+          "entity_1": "First entity", "label_1": "First label", "unit_1": "First unit",
+          "entity_2": "Second entity", "label_2": "Second label", "unit_2": "Second unit"
+        },
+        "data_description": {
+          "label_1": "Optional. Up to 80 characters; text fits the available space.",
+          "label_2": "Optional. Up to 80 characters; text fits the available space.",
+          "unit_1": "Optional. Up to 16 characters. Enter - to hide the unit.",
+          "unit_2": "Optional. Up to 16 characters. Enter - to hide the unit."
+        }
+      },
+      "preview": {
+        "title": "Preview screen",
+        "description": "{preview}\n\nThis preview uses the current values. Apply saves the layout and sends it to the display. Edit returns to the settings; refresh updates the preview.",
+        "data": {"action": "Next step"}
+      }
+    },
+    "error": {
+      "invalid_settings": "Check the value and its allowed length or range.",
+      "entity_not_found": "Choose an existing entity.",
+      "invalid_entity": "Display diagnostics cannot be used as a source for the screen.",
+      "render_failed": "Unable to draw the preview. Edit the settings or check the Home Assistant log."
+    }
+  },
+  "selector": {
+    "preset": {"options": {
+      "clock": "Clock and date",
+      "single_value": "One large value",
+      "clock_two_values": "Clock and two values"
+    }},
+    "preview_action": {"options": {
+      "apply": "Apply", "edit": "Edit", "refresh": "Refresh preview"
+    }}
+  }
+}

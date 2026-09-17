@@ -4,7 +4,7 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.storage import Store
 import voluptuous as vol
@@ -59,6 +59,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await display.async_close()
 
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stop))
+    async def update_options(_hass: HomeAssistant, updated: ConfigEntry) -> None:
+        if settings := updated.options.get("screen"):
+            try:
+                await display.async_apply_settings(settings, updated.options["screen_revision"])
+            except HomeAssistantError:
+                # The controller retains the intended screen and exposes the
+                # BLE error in diagnostics. Options remain saved for retry.
+                pass
+
+    entry.async_on_unload(entry.add_update_listener(update_options))
     display.async_start()
     return True
 

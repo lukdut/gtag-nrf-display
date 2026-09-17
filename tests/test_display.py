@@ -65,7 +65,7 @@ module("homeassistant.helpers")
 module("homeassistant.helpers.device_registry",
        CONNECTION_BLUETOOTH="bluetooth", DeviceInfo=dict)
 module("homeassistant.helpers.entity_platform", AddConfigEntryEntitiesCallback=object)
-module("gtag_under_test", __path__=[str(ROOT / "config/custom_components/gtag_ble_test")])
+module("gtag_under_test", __path__=[str(ROOT / "custom_components/gtag_ble_test")])
 transport = importlib.import_module("gtag_under_test.transport")
 codec = importlib.import_module("gtag_under_test.frame_codec")
 switch = importlib.import_module("gtag_under_test.switch")
