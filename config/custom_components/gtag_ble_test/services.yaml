@@ -1,0 +1,37 @@
+draw:
+  name: Draw screen
+  description: Render and send a 256x128 screen. Replaces the clock screen; nearby requests are combined.
+  fields:
+    device_id:
+      name: Display
+      required: true
+      selector:
+        device:
+          integration: gtag_ble_test
+    background:
+      name: Background
+      default: white
+      selector:
+        select:
+          options:
+            - white
+            - black
+    elements:
+      name: Elements
+      description: "List of text, line, rectangle and icon objects with pixel coordinates. Text supports HA templates."
+      required: true
+      example: '[{"type": "text", "x": 8, "y": 8, "text": "Привет!", "size": 24}]'
+      selector:
+        object:
+    force:
+      name: Force update
+      description: Send even when the image matches the last successful transfer.
+      default: false
+      selector:
+        boolean:
+    auto_update:
+      name: Automatic updates
+      description: Track entities and time referenced by text templates and redraw when their values change.
+      default: true
+      selector:
+        boolean:

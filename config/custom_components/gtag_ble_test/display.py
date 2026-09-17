@@ -1,0 +1,323 @@
+"""Per-display queue, rendering, clock updates and last successful preview."""
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable
+from contextlib import suppress
+from copy import deepcopy
+from dataclasses import dataclass
+from datetime import datetime
+import logging
+from typing import Any
+
+import voluptuous as vol
+
+from homeassistant.const import CONF_ADDRESS
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.event import TrackTemplate, async_track_template_result, async_track_time_change
+from homeassistant.helpers.storage import Store
+from homeassistant.helpers.template import Template
+from homeassistant.util import dt as dt_util
+
+from .const import DOMAIN
+from .frame_protocol import PreparedFrame
+from .render import LAYOUT_SCHEMA, RenderedFrame, clock_layout, from_raw, render_layout
+from .transport import FrameSender, connect, get_operation_lock
+
+_LOGGER = logging.getLogger(__name__)
+MIN_UPDATE_INTERVAL = 5.0
+COALESCE_SECONDS = 0.25
+# A rebooted peripheral cannot advertise its lost framebuffer with protocol v1.
+# Bound local duplicate suppression; Refresh and force always bypass it.
+UNCHANGED_MAX_AGE = 900.0
+
+
+@dataclass
+class DrawRequest:
+    mode: str
+    content: dict[str, Any] | bytes | None
+    force: bool
+    result: asyncio.Future
+
+
+class Display:
+    def __init__(self, hass: HomeAssistant, entry) -> None:
+        self.hass = hass
+        self.entry_id = entry.entry_id
+        self.address = entry.data[CONF_ADDRESS]
+        self.name = entry.title
+        self.clock_enabled = False
+        self.auto_update = True
+        self.last_layout: dict[str, Any] | None = None
+        self.preview: bytes | None = None
+        self.last_success: datetime | None = None
+        self.last_error: str | None = None
+        self.status = "idle"
+        self.report: dict[str, Any] = {}
+        self._store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
+        self._listeners: set[Callable[[], None]] = set()
+        self._clock_unsubscribe: Callable[[], None] | None = None
+        self._template_tracker = None
+        self._pending: DrawRequest | None = None
+        self._worker: asyncio.Task | None = None
+        self._intent_lock = asyncio.Lock()
+        self._closed = False
+        self._last_frame: bytes | None = None
+        self._last_success_time = float("-inf")
+        self._last_attempt_end = float("-inf")
+
+    async def async_load(self) -> None:
+        if not (saved := await self._store.async_load()):
+            return
+        if not isinstance(saved, dict):
+            _LOGGER.warning("%s: ignoring invalid saved display settings", self.address)
+            return
+        self.clock_enabled = saved.get("clock_enabled", False) is True
+        self.auto_update = saved.get("auto_update", True) is True
+        if saved.get("layout") is not None:
+            try:
+                self.last_layout = self._validate_layout(saved["layout"])
+            except (vol.Invalid, HomeAssistantError, TypeError) as err:
+                _LOGGER.warning("%s: ignoring invalid saved layout: %s", self.address, err)
+
+    def _validate_layout(self, layout: dict[str, Any]) -> dict[str, Any]:
+        layout = LAYOUT_SCHEMA(layout)
+        for element in layout["elements"]:
+            if element["type"] == "text":
+                Template(element["text"], self.hass).ensure_valid()
+        return layout
+
+    async def _save(self) -> None:
+        await self._store.async_save({
+            "clock_enabled": self.clock_enabled, "layout": self.last_layout,
+            "auto_update": self.auto_update,
+        })
+
+    @callback
+    def subscribe(self, listener: Callable[[], None]) -> Callable[[], None]:
+        self._listeners.add(listener)
+        return lambda: self._listeners.discard(listener)
+
+    @callback
+    def _notify(self) -> None:
+        for listener in tuple(self._listeners):
+            listener()
+
+    @callback
+    def async_start(self) -> None:
+        if self.clock_enabled:
+            self._start_clock()
+            self._enqueue("clock", None, True)
+        elif self.last_layout is not None:
+            self._watch_layout()
+            self._enqueue("layout", deepcopy(self.last_layout), True)
+
+    @callback
+    def _stop_watching(self) -> None:
+        if self._template_tracker is not None:
+            self._template_tracker.async_remove()
+            self._template_tracker = None
+
+    @callback
+    def _watch_layout(self) -> None:
+        self._stop_watching()
+        if not self.auto_update or self.last_layout is None:
+            return
+        templates = []
+        for element in self.last_layout["elements"]:
+            if element["type"] == "text":
+                template = Template(element["text"], self.hass)
+                if not template.is_static:
+                    templates.append(TrackTemplate(template, None))
+        if templates:
+            self._template_tracker = async_track_template_result(
+                self.hass, templates, self._on_template_change,
+            )
+            self._template_tracker.async_refresh()
+
+    @callback
+    def _on_template_change(self, _event, _updates) -> None:
+        if not self._closed and not self.clock_enabled and self.last_layout is not None:
+            self._enqueue("layout", deepcopy(self.last_layout), False)
+
+    @callback
+    def _start_clock(self) -> None:
+        if self._clock_unsubscribe is None:
+            self._clock_unsubscribe = async_track_time_change(
+                self.hass, self._on_minute, second=0,
+            )
+
+    @callback
+    def _on_minute(self, _now: datetime) -> None:
+        if self.clock_enabled and not self._closed:
+            self._enqueue("clock", None, False)
+
+    @callback
+    def _stop_clock(self) -> None:
+        self.clock_enabled = False
+        if self._clock_unsubscribe is not None:
+            self._clock_unsubscribe()
+            self._clock_unsubscribe = None
+        if self._pending is not None and self._pending.mode == "clock":
+            self._resolve(self._pending, {"status": "superseded"})
+            self._pending = None
+            if self.status == "queued":
+                self.status = "sent" if self.last_success else "idle"
+
+    async def async_set_clock(self, enabled: bool) -> None:
+        async with self._intent_lock:
+            if enabled:
+                self._stop_watching()
+                self.last_layout = None
+                self.clock_enabled = True
+                self._start_clock()
+            else:
+                self._stop_clock()
+            await self._save()
+            self._notify()
+            # A failed transfer must not turn the clock off: next minute retries.
+            result = self._enqueue("clock", None, True) if enabled else None
+        if result is not None:
+            await asyncio.shield(result)
+
+    async def async_draw(self, layout: dict[str, Any], *, force: bool = False,
+                         auto_update: bool = True) -> dict:
+        layout = self._validate_layout(layout)
+        async with self._intent_lock:
+            self._stop_clock()
+            self._stop_watching()
+            self.last_layout = deepcopy(layout)
+            self.auto_update = auto_update
+            await self._save()
+            self._watch_layout()
+            result = self._enqueue("layout", layout, force)
+        return await asyncio.shield(result)
+
+    async def async_draw_raw(self, raw: bytes) -> dict:
+        if len(raw) != 4096:
+            raise HomeAssistantError("Expected a 4096-byte framebuffer")
+        async with self._intent_lock:
+            self._stop_clock()
+            self._stop_watching()
+            self.last_layout = None
+            await self._save()
+            result = self._enqueue("raw", raw, True)
+        return await asyncio.shield(result)
+
+    async def async_refresh(self) -> dict:
+        if self.clock_enabled:
+            result = self._enqueue("clock", None, True)
+        elif self.last_layout is not None:
+            result = self._enqueue("layout", deepcopy(self.last_layout), True)
+        elif self._last_frame is not None:
+            result = self._enqueue("raw", self._last_frame, True)
+        else:
+            result = self._enqueue("clock", None, True)
+        return await asyncio.shield(result)
+
+    @callback
+    def _enqueue(self, mode: str, content, force: bool) -> asyncio.Future:
+        if self._closed:
+            raise HomeAssistantError("The display integration is unloading")
+        result = self.hass.loop.create_future()
+        # Timer-initiated requests have no waiter. Consume exceptions in either
+        # case; an awaiting service caller still receives the same exception.
+        result.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        if self._pending is not None:
+            self._resolve(self._pending, {"status": "superseded"})
+        self._pending = DrawRequest(mode, content, force, result)
+        if self.status != "sending":
+            self.status = "queued"
+        self._notify()
+        if self._worker is None or self._worker.done():
+            self._worker = self.hass.async_create_background_task(
+                self._run_queue(), f"GTag draw {self.address}",
+            )
+        return result
+
+    @staticmethod
+    def _resolve(request: DrawRequest, result: dict | Exception) -> None:
+        if request.result.done():
+            return
+        if isinstance(result, Exception):
+            request.result.set_exception(result)
+        else:
+            request.result.set_result(result)
+
+    async def _render(self, request: DrawRequest) -> RenderedFrame:
+        if request.mode == "raw":
+            return await self.hass.async_add_executor_job(from_raw, request.content)
+        layout = clock_layout(dt_util.now()) if request.mode == "clock" else deepcopy(request.content)
+        # Resolve HA state/time templates in the event loop; Pillow and disk I/O
+        # run below in the executor. Automations may also render templates first.
+        for element in layout["elements"]:
+            if element["type"] == "text":
+                element["text"] = Template(element["text"], self.hass).async_render(
+                    parse_result=False,
+                )
+        return await self.hass.async_add_executor_job(render_layout, layout)
+
+    async def _run_queue(self) -> None:
+        try:
+            while self._pending is not None and not self._closed:
+                delay = max(COALESCE_SECONDS,
+                            self._last_attempt_end + MIN_UPDATE_INTERVAL - self.hass.loop.time())
+                await asyncio.sleep(delay)
+                request, self._pending = self._pending, None
+                if request is None:
+                    continue
+                attempted = False
+                try:
+                    frame = await self._render(request)
+                    if (not request.force and frame.raw == self._last_frame
+                            and self.hass.loop.time() - self._last_success_time < UNCHANGED_MAX_AGE):
+                        self.status = "unchanged"
+                        self._resolve(request, {"status": "unchanged"})
+                        continue
+                    attempted = True
+                    self.status = "sending"
+                    self._notify()
+                    prepared = await self.hass.async_add_executor_job(PreparedFrame.prepare, frame.raw)
+                    async with get_operation_lock(self.hass, self.address):
+                        sender = FrameSender(lambda: connect(self.hass, self.address), self.address)
+                        report = await sender.send_prepared(prepared)
+                    # Publish ONLY after successful CRC verification and disconnect.
+                    self.preview = frame.png
+                    self._last_frame = frame.raw
+                    self.last_success = dt_util.utcnow()
+                    self._last_success_time = self.hass.loop.time()
+                    self.report = report.attributes()
+                    self.last_error = None
+                    self.status = "sent"
+                    self._resolve(request, {"status": "sent", **self.report})
+                except asyncio.CancelledError:
+                    self._resolve(request, HomeAssistantError("Display update cancelled during unload"))
+                    raise
+                except Exception as err:
+                    self._last_frame = None
+                    self.last_error = str(err)
+                    self.status = "error"
+                    _LOGGER.error("%s: display update failed: %s", self.address, err)
+                    self._resolve(request, HomeAssistantError(str(err)))
+                finally:
+                    if attempted:
+                        self._last_attempt_end = self.hass.loop.time()
+                    if self._pending is not None:
+                        self.status = "queued"
+                    self._notify()
+        finally:
+            self._worker = None
+
+    async def async_close(self) -> None:
+        self._closed = True
+        self._stop_watching()
+        self._stop_clock()
+        if self._pending is not None:
+            self._resolve(self._pending, HomeAssistantError("Display integration unloaded"))
+            self._pending = None
+        if self._worker is not None:
+            self._worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._worker
+        self._listeners.clear()

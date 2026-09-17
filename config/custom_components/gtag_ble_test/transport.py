@@ -362,7 +362,11 @@ class FrameSender:
         if len(frame) != FRAME_SIZE:
             raise ValueError(f"Frame must have exactly {FRAME_SIZE} bytes")
 
-        prepared = PreparedFrame.prepare(frame)
+        prepared = await asyncio.to_thread(PreparedFrame.prepare, frame)
+        return await self.send_prepared(prepared)
+
+    async def send_prepared(self, prepared: PreparedFrame) -> Report:
+        """Send a frame already encoded outside the HA event loop."""
         desc = prepared.descriptor
         payload = prepared.payload
 

@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
-from .transport import FrameSender, connect, get_operation_lock
+from .entity import GTagEntity
 
 
 WIDTH = 256
@@ -24,11 +21,8 @@ async def async_setup_entry(
 ) -> None:
     async_add_entities(
         [
-            SendTestFrameButton(
-                hass,
-                config_entry.title,
-                config_entry.data[CONF_ADDRESS],
-            )
+            SendTestFrameButton(config_entry.runtime_data),
+            RefreshDisplayButton(config_entry.runtime_data),
         ]
     )
 
@@ -143,31 +137,27 @@ def make_sparse_test_frame() -> bytes:
     return bytes(frame)
 
 
-class SendTestFrameButton(ButtonEntity):
-    _attr_has_entity_name = True
+class SendTestFrameButton(GTagEntity, ButtonEntity):
     _attr_name = "Send RLE test image"
 
-    def __init__(self, hass: HomeAssistant, name: str, address: str) -> None:
-        self.hass = hass
-        self._address = address
-        self._attr_unique_id = f"{address}_send_test_frame"
-        self._attr_extra_state_attributes = {}
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, address)},
-            connections={(CONNECTION_BLUETOOTH, address)},
-            manufacturer="DIY",
-            model="nRF52840 G-Tag Display",
-            name=name,
-        )
+    def __init__(self, display):
+        super().__init__(display, "send_test_frame")
+
+    @property
+    def extra_state_attributes(self):
+        return self.display.report
 
     async def async_press(self) -> None:
-        lock = get_operation_lock(self.hass, self._address)
-        async with lock:
-            sender = FrameSender(
-                lambda: connect(self.hass, self._address),
-                self._address,
-            )
-            report = await sender.send(make_sparse_test_frame())
+        frame = await self.hass.async_add_executor_job(make_sparse_test_frame)
+        await self.display.async_draw_raw(frame)
 
-        self._attr_extra_state_attributes = report.attributes()
-        self.async_write_ha_state()
+
+class RefreshDisplayButton(GTagEntity, ButtonEntity):
+    _attr_name = "Refresh display"
+    _attr_icon = "mdi:refresh"
+
+    def __init__(self, display):
+        super().__init__(display, "refresh")
+
+    async def async_press(self):
+        await self.display.async_refresh()

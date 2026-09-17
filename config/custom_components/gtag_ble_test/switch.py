@@ -23,7 +23,8 @@ async def async_setup_entry(
                 hass,
                 config_entry.title,
                 config_entry.data[CONF_ADDRESS],
-            )
+            ),
+            GTagClock(config_entry.runtime_data),
         ]
     )
 
@@ -57,3 +58,29 @@ class GTagLED(SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self._write(False)
+
+
+class GTagClock(SwitchEntity):
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_name = "Clock screen"
+    _attr_icon = "mdi:clock-outline"
+
+    def __init__(self, display) -> None:
+        self.display = display
+        self._attr_unique_id = f"{display.address}_clock_screen"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, display.address)})
+
+    @property
+    def is_on(self):
+        return self.display.clock_enabled
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self.async_on_remove(self.display.subscribe(self.async_write_ha_state))
+
+    async def async_turn_on(self, **kwargs):
+        await self.display.async_set_clock(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self.display.async_set_clock(False)
