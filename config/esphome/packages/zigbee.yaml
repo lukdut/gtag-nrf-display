@@ -1,6 +1,6 @@
-# Public BLE package. Pin both this package and its C++ component to one release.
+# Public Zigbee package. Pin the package and its C++ component to the same release.
 packages:
-  gtag_base: !include ble-base.yaml
+  gtag_base: !include zigbee-base.yaml
 
 external_components:
   - source:

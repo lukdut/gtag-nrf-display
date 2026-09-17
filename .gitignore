@@ -8,3 +8,5 @@ venv/
 secrets.yaml
 /dist/
 /.nrf-sdk/
+node_modules/
+tests/zigbee/.runtime-*/

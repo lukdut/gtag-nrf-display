@@ -1,0 +1,67 @@
+# Zigbee prototype: CRC-checked frame transfer, ADC telemetry and LCD patterns.
+# Requires the project's Zigbee2MQTT external converter for frame transfer.
+packages:
+  board: !include board.yaml
+
+substitutions:
+  gtag_name: nrf-gtag-zigbee
+  gtag_friendly_name: GTag Zigbee Display
+  # Poll the parent every 3 s while idle; accelerate polling during frame transfer.
+  # Set false to compare with the previous always-on receiver.
+  gtag_zigbee_sleepy: "true"
+
+esphome:
+  min_version: 2026.9.0
+
+zigbee:
+  id: gtag_zigbee
+  model: GTag_Display_Frame_V1
+  router: false
+  power_source: BATTERY
+  sleepy: ${gtag_zigbee_sleepy}
+  wipe_on_boot: false
+
+gtag_display:
+  id: gtag_lcd
+  transport: zigbee
+  zigbee_id: gtag_zigbee
+  boot_test_pattern: checkerboard
+  battery_voltage:
+    calibration: ${gtag_battery_calibration}
+
+sensor:
+  - platform: template
+    id: gtag_battery_sensor
+    name: Battery voltage
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 3
+    # Read the cache; the shared driver samples the ADC once per five minutes.
+    update_interval: 10s
+    lambda: |-
+      const uint16_t mv = id(gtag_lcd).battery_mv();
+      return mv == 0xFFFF ? NAN : mv * 0.001f;
+
+  - platform: template
+    id: gtag_rendered_sensor
+    name: Rendered frames
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: return id(gtag_lcd).rendered_frames();
+
+number:
+  - platform: template
+    id: gtag_pattern
+    name: Display pattern
+    min_value: 0
+    max_value: 3
+    step: 1
+    initial_value: 2
+    restore_value: false
+    optimistic: true
+    # 0 white, 1 black, 2 checkerboard, 3 stripes.
+    set_action:
+      - lambda: |-
+          if (std::isfinite(x) && x >= 0 && x <= 3 && x == static_cast<int>(x))
+            id(gtag_lcd).request_test_pattern(static_cast<uint8_t>(x));

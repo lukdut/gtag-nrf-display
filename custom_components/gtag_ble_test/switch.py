@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, TRANSPORT_BLE
 from .transport import write_led
 
 
@@ -17,16 +17,11 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    async_add_entities(
-        [
-            GTagLED(
-                hass,
-                config_entry.title,
-                config_entry.data[CONF_ADDRESS],
-            ),
-            GTagClock(config_entry.runtime_data),
-        ]
-    )
+    display = config_entry.runtime_data
+    entities = [GTagClock(display)]
+    if display.transport == TRANSPORT_BLE:
+        entities.insert(0, GTagLED(hass, config_entry.title, config_entry.data[CONF_ADDRESS]))
+    async_add_entities(entities)
 
 
 class GTagLED(SwitchEntity):
@@ -68,8 +63,8 @@ class GTagClock(SwitchEntity):
 
     def __init__(self, display) -> None:
         self.display = display
-        self._attr_unique_id = f"{display.address}_clock_screen"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, display.address)})
+        self._attr_unique_id = f"{display.identity}_clock_screen"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, display.identity)})
 
     @property
     def is_on(self):

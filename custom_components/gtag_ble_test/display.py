@@ -20,7 +20,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_BLE, TRANSPORT_ZIGBEE
 from .battery import BatteryMonitor
 from .frame_protocol import PreparedFrame
 from .layouts import async_render_layout, preset_layout, validate_settings
@@ -48,6 +48,8 @@ class Display:
         self.hass = hass
         self.entry_id = entry.entry_id
         self.address = entry.data[CONF_ADDRESS]
+        self.transport = entry.data.get(CONF_TRANSPORT, TRANSPORT_BLE)
+        self.identity = f"zigbee:{self.address}" if self.transport == TRANSPORT_ZIGBEE else self.address
         self.name = entry.title
         self.clock_enabled = False
         self.auto_update = True
@@ -73,7 +75,12 @@ class Display:
         self._entry_options = entry.options
         self._options_revision = None
         self._configured_interval = entry.options.get("screen", {}).get("update_interval")
-        self.battery = BatteryMonitor(hass, self.address, self._notify)
+        self.zigbee = None
+        if self.transport == TRANSPORT_ZIGBEE:
+            from .zigbee import ZigbeeTransport
+
+            self.zigbee = ZigbeeTransport(hass, entry, self._notify, self._on_link_restored)
+        self.battery = self.zigbee or BatteryMonitor(hass, self.address, self._notify)
 
     @property
     def update_interval(self) -> float:
@@ -105,6 +112,8 @@ class Display:
         await asyncio.shield(result)
 
     async def async_load(self) -> None:
+        if self.zigbee is not None:
+            await self.zigbee.async_setup()
         saved = await self._store.async_load() or {}
         if not isinstance(saved, dict):
             _LOGGER.warning("%s: ignoring invalid saved display settings", self.address)
@@ -148,6 +157,15 @@ class Display:
     def _notify(self) -> None:
         for listener in tuple(self._listeners):
             listener()
+
+    @callback
+    def _on_link_restored(self) -> None:
+        if self._closed or self.last_error is None or self._pending is not None:
+            return
+        if self.clock_enabled:
+            self._enqueue("clock", None, True)
+        elif self.last_layout is not None:
+            self._enqueue("layout", deepcopy(self.last_layout), True)
 
     @callback
     def async_start(self) -> None:
@@ -331,16 +349,20 @@ class Display:
                     attempted = True
                     self.status = "sending"
                     self._notify()
-                    prepared = await self.hass.async_add_executor_job(PreparedFrame.prepare, frame.raw)
-                    async with get_operation_lock(self.hass, self.address):
-                        sender = FrameSender(lambda: connect(self.hass, self.address), self.address)
-                        report = await sender.send_prepared(prepared)
-                    # Publish ONLY after successful CRC verification and disconnect.
+                    if self.zigbee is not None:
+                        report_attributes = await self.zigbee.async_send(frame.raw)
+                    else:
+                        prepared = await self.hass.async_add_executor_job(PreparedFrame.prepare, frame.raw)
+                        async with get_operation_lock(self.hass, self.address):
+                            sender = FrameSender(lambda: connect(self.hass, self.address), self.address)
+                            report = await sender.send_prepared(prepared)
+                        report_attributes = {"transport": TRANSPORT_BLE, **report.attributes()}
+                    # Update preview only after the transport confirms this frame.
                     self.preview = frame.png
                     self._last_frame = frame.raw
                     self.last_success = dt_util.utcnow()
                     self._last_success_time = self.hass.loop.time()
-                    self.report = report.attributes()
+                    self.report = report_attributes
                     self.last_error = None
                     self.status = "sent"
                     self._resolve(request, {"status": "sent", **self.report})

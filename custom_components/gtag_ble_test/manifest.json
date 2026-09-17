@@ -1,11 +1,9 @@
 {
   "domain": "gtag_ble_test",
   "name": "GTag Display",
-  "version": "0.8.0",
+  "version": "0.9.0-beta.1",
   "config_flow": true,
-  "dependencies": [
-    "bluetooth"
-  ],
+  "after_dependencies": ["bluetooth", "mqtt"],
   "iot_class": "local_push",
   "bluetooth": [
     {

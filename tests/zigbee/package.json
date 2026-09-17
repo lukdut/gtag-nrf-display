@@ -1,0 +1,10 @@
+{
+  "name": "gtag-zigbee-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node run.mjs"},
+  "devDependencies": {
+    "zigbee-herdsman": "10.4.0",
+    "zigbee-herdsman-converters": "26.63.0"
+  }
+}

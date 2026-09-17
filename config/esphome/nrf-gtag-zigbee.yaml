@@ -1,0 +1,14 @@
+# Experimental Zigbee profile, built with ESPHome 2026.9.0.
+# Uses the SAME LCD/ADC component as BLE. See docs/zigbee-prototype.md.
+packages:
+  gtag: !include packages/zigbee-base.yaml
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [gtag_display]
+
+# Optional USB diagnostics (increases power use):
+# logger:
+#   level: DEBUG

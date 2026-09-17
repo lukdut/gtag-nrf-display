@@ -1,4 +1,4 @@
-"""Transfer diagnostics and battery voltage from the shared BLE monitor."""
+"""Transfer diagnostics and battery voltage for either transport."""
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import UnitOfElectricPotential
 from homeassistant.helpers.entity import EntityCategory
@@ -71,6 +71,7 @@ class TransferStatus(GTagEntity, SensorEntity):
         # diagnostics on this always-available status entity as well.
         battery = self.display.battery
         return {
+            "transport": self.display.transport,
             "last_error": self.display.last_error, **self.display.report,
             "battery_last_read": battery.last_read,
             "battery_last_error": battery.last_error,

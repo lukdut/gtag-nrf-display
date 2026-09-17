@@ -7,7 +7,27 @@
         "description": "Add the G-Tag display connected through nRF52840."
       },
       "user": {
-        "title": "Select device",
+        "title": "Connection type",
+        "menu_options": {
+          "ble": "Bluetooth",
+          "zigbee": "Zigbee2MQTT"
+        }
+      },
+      "ble": {
+        "title": "Choose a Bluetooth display",
+        "data": {
+          "address": "Device"
+        }
+      },
+      "zigbee": {
+        "title": "Connect through Zigbee2MQTT",
+        "description": "First pair the display in Zigbee2MQTT and install the GTag converter from this package. Configure the MQTT integration in HA.",
+        "data": {
+          "base_topic": "Zigbee2MQTT base topic"
+        }
+      },
+      "zigbee_device": {
+        "title": "Choose a Zigbee display",
         "data": {
           "address": "Device"
         }
@@ -15,7 +35,15 @@
     },
     "abort": {
       "already_configured": "Already configured.",
-      "no_devices_found": "No GTag BLE devices found."
+      "no_devices_found": "No GTag BLE devices found.",
+      "bluetooth_not_ready": "Bluetooth is unavailable. Check its setup in Home Assistant."
+    },
+    "error": {
+      "invalid_topic": "Enter a base topic without leading/trailing slashes, + or #.",
+      "mqtt_not_ready": "Set up the MQTT integration in Home Assistant first.",
+      "cannot_connect": "No device inventory received. Check MQTT, Zigbee2MQTT and the base topic.",
+      "no_zigbee_devices": "No new GTag displays found. Check pairing and Frame_V1 firmware.",
+      "converter_update_required": "Update the gtag-display.mjs external converter in Zigbee2MQTT from this package."
     }
   },
   "options": {
@@ -35,8 +63,12 @@
         "title": "Display values",
         "description": "Choose the information to display. Empty labels and units use the entity's own name and unit.",
         "data": {
-          "entity_1": "First entity", "label_1": "First label", "unit_1": "First unit",
-          "entity_2": "Second entity", "label_2": "Second label", "unit_2": "Second unit"
+          "entity_1": "First entity",
+          "label_1": "First label",
+          "unit_1": "First unit",
+          "entity_2": "Second entity",
+          "label_2": "Second label",
+          "unit_2": "Second unit"
         },
         "data_description": {
           "label_1": "Optional. Up to 80 characters; text fits the available space.",
@@ -48,7 +80,9 @@
       "preview": {
         "title": "Preview screen",
         "description": "{preview}\n\nThis preview uses the current values. Apply saves the layout and sends it to the display. Edit returns to the settings; refresh updates the preview.",
-        "data": {"action": "Next step"}
+        "data": {
+          "action": "Next step"
+        }
       }
     },
     "error": {
@@ -59,13 +93,19 @@
     }
   },
   "selector": {
-    "preset": {"options": {
-      "clock": "Clock and date",
-      "single_value": "One large value",
-      "clock_two_values": "Clock and two values"
-    }},
-    "preview_action": {"options": {
-      "apply": "Apply", "edit": "Edit", "refresh": "Refresh preview"
-    }}
+    "preset": {
+      "options": {
+        "clock": "Clock and date",
+        "single_value": "One large value",
+        "clock_two_values": "Clock and two values"
+      }
+    },
+    "preview_action": {
+      "options": {
+        "apply": "Apply",
+        "edit": "Edit",
+        "refresh": "Refresh preview"
+      }
+    }
   }
 }

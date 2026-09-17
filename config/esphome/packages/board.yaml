@@ -1,0 +1,21 @@
+# Shared board, bootloader and application idle settings for both transports.
+substitutions:
+  gtag_name: nrf-gtag-display
+  gtag_friendly_name: NRF GTag Display
+  gtag_battery_calibration: "1.0"
+
+esphome:
+  name: ${gtag_name}
+  friendly_name: ${gtag_friendly_name}
+  min_version: 2026.8.2
+  on_boot:
+    priority: -100
+    then:
+      - lambda: App.set_loop_interval(1000);
+
+nrf52:
+  board: adafruit_itsybitsy_nrf52840
+  bootloader: adafruit_nrf52_sd140_v6
+  dcdc: false
+  framework:
+    version: 2.9.2

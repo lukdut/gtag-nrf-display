@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import asyncio
 import logging
 import secrets
 import voluptuous as vol
@@ -14,9 +15,10 @@ from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er, selector
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, SERVICE_UUID
+from .const import CONF_TRANSPORT, DOMAIN, SERVICE_UUID, TRANSPORT_BLE, TRANSPORT_ZIGBEE
 from .layouts import DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, async_render_layout, preset_layout, validate_settings, value_count
 from .render import clock_layout, preview_svg
 
@@ -34,6 +36,8 @@ class GTagBLETestConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._info: BluetoothServiceInfoBleak | None = None
         self._devices: dict[str, BluetoothServiceInfoBleak] = {}
+        self._zigbee_devices: dict[str, dict] = {}
+        self._base_topic = "zigbee2mqtt"
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
@@ -66,6 +70,63 @@ class GTagBLETestConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="user", menu_options=["ble", "zigbee"])
+
+    async def async_step_zigbee(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        from homeassistant.components import mqtt
+        from .zigbee import async_discover, valid_base_topic
+
+        errors = {}
+        if user_input is not None:
+            try:
+                self._base_topic = valid_base_topic(user_input["base_topic"])
+            except ValueError:
+                errors["base_topic"] = "invalid_topic"
+            else:
+                try:
+                    async with asyncio.timeout(15):
+                        ready = await mqtt.async_wait_for_mqtt_client(self.hass)
+                    if not ready:
+                        errors["base"] = "mqtt_not_ready"
+                    else:
+                        found = await async_discover(self.hass, self._base_topic)
+                        configured = self._async_current_ids(include_ignore=False)
+                        found = {ieee: device for ieee, device in found.items() if f"zigbee:{ieee}" not in configured}
+                        self._zigbee_devices = {ieee: device for ieee, device in found.items() if device["compatible"]}
+                        if self._zigbee_devices:
+                            return await self.async_step_zigbee_device()
+                        errors["base"] = "converter_update_required" if found else "no_zigbee_devices"
+                except (TimeoutError, HomeAssistantError):
+                    errors["base"] = "cannot_connect"
+        return self.async_show_form(step_id="zigbee", data_schema=vol.Schema({
+            vol.Required("base_topic", default=self._base_topic): str,
+        }), errors=errors)
+
+    async def async_step_zigbee_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            address = user_input[CONF_ADDRESS]
+            device = self._zigbee_devices[address]
+            await self.async_set_unique_id(f"zigbee:{address}")
+            self._abort_if_unique_id_configured()
+            return self.async_create_entry(title=device["friendly_name"], data={
+                CONF_TRANSPORT: TRANSPORT_ZIGBEE, CONF_ADDRESS: address,
+                "base_topic": self._base_topic, "friendly_name": device["friendly_name"],
+            })
+        return self.async_show_form(step_id="zigbee_device", data_schema=vol.Schema({
+            vol.Required(CONF_ADDRESS): vol.In({
+                ieee: f"{device['friendly_name']} ({ieee})" for ieee, device in self._zigbee_devices.items()
+            }),
+        }))
+
+    async def async_step_ble(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if not await async_setup_component(self.hass, "bluetooth", {}):
+            return self.async_abort(reason="bluetooth_not_ready")
         configured = self._async_current_ids(include_ignore=False)
 
         for info in async_discovered_service_info(self.hass):
@@ -87,7 +148,7 @@ class GTagBLETestConfigFlow(ConfigFlow, domain=DOMAIN):
 
             return self.async_create_entry(
                 title=info.name or info.address,
-                data={CONF_ADDRESS: address},
+                data={CONF_ADDRESS: address, CONF_TRANSPORT: TRANSPORT_BLE},
             )
 
         if not self._devices:
@@ -99,7 +160,7 @@ class GTagBLETestConfigFlow(ConfigFlow, domain=DOMAIN):
         }
 
         return self.async_show_form(
-            step_id="user",
+            step_id="ble",
             data_schema=vol.Schema(
                 {vol.Required(CONF_ADDRESS): vol.In(choices)}
             ),

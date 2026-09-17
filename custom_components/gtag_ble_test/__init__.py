@@ -1,15 +1,16 @@
-"""G-Tag BLE display integration."""
+"""GTag display integration for Bluetooth and Zigbee2MQTT."""
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.storage import Store
+from homeassistant.setup import async_setup_component
 import voluptuous as vol
 
-from .const import DOMAIN
+from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_ZIGBEE
 from .display import Display
 from .render import LAYOUT_SCHEMA
 
@@ -46,9 +47,16 @@ async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if entry.data.get(CONF_TRANSPORT) == TRANSPORT_ZIGBEE:
+        from homeassistant.components import mqtt
+
+        if not await mqtt.async_wait_for_mqtt_client(hass):
+            raise ConfigEntryNotReady("Configure the MQTT integration to use Zigbee2MQTT")
+    elif not await async_setup_component(hass, "bluetooth", {}):
+        raise ConfigEntryNotReady("Bluetooth is not ready")
     display = entry.runtime_data = Display(hass, entry)
-    await display.async_load()
     try:
+        await display.async_load()
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except Exception:
         await display.async_close()
@@ -65,7 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await display.async_apply_settings(settings, updated.options["screen_revision"])
             except HomeAssistantError:
                 # The controller retains the intended screen and exposes the
-                # BLE error in diagnostics. Options remain saved for retry.
+                # transport error in diagnostics. Options remain saved for retry.
                 pass
 
     entry.async_on_unload(entry.add_update_listener(update_options))

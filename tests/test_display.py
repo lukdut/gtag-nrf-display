@@ -73,7 +73,7 @@ logging.getLogger(transport.__name__).setLevel(logging.CRITICAL)
 
 
 def setUpModule():
-    global build, fw, fw_without_battery
+    global build, fw, fw_without_battery, fw_zigbee
     build = tempfile.TemporaryDirectory(prefix="gtag-tests-")
     path = Path(build.name)
     # Redirect platform includes to the host model, without editing the driver.
@@ -99,8 +99,13 @@ def setUpModule():
     subprocess.run([*command, "-DUSE_GTAG_BATTERY", "-o", str(library)], check=True)
     disabled_library = path / "driver_without_battery.so"
     subprocess.run([*command, "-o", str(disabled_library)], check=True)
+    zigbee_library = path / "driver_zigbee.so"
+    subprocess.run([*command, "-DUSE_GTAG_ZIGBEE", "-DUSE_GTAG_BATTERY",
+                    "-o", str(zigbee_library)], check=True)
     fw = ctypes.CDLL(str(library))
     fw_without_battery = ctypes.CDLL(str(disabled_library))
+    fw_zigbee = ctypes.CDLL(str(zigbee_library))
+    fw_zigbee.firmware_packet.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p]
     fw.firmware_calibration.argtypes = [ctypes.c_float]
     for variant in (fw, fw_without_battery):
         variant.firmware_battery.argtypes = [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16]
@@ -314,6 +319,140 @@ class DisplayTests(unittest.TestCase):
         fw.firmware_disconnect()
         fw.firmware_run(0)
         self.assertEqual(words(), reference)
+
+
+class ZigbeeDisplayTests(unittest.TestCase):
+    """Exercise the shared driver without BLE; radio/ZCL need hardware testing."""
+
+    def setUp(self):
+        fw_zigbee.firmware_create(3, 1000)  # Boot checkerboard.
+
+    def packet(self, data):
+        reply = ctypes.create_string_buffer(20)
+        fw_zigbee.firmware_packet(data, len(data), reply)
+        return reply.raw
+
+    def send_frame(self, raw, session=123, bad_crc=False):
+        encoded = codec.encode_best(raw)
+        begin = struct.pack('<BBBHII', 1, 1, encoded.codec, len(encoded.payload), session,
+                            encoded.raw_crc32 ^ int(bad_crc))
+        self.assertEqual(self.packet(begin)[2], 0)
+        for offset in range(0, len(encoded.payload), 32):
+            data = struct.pack('<BIH', 2, session, offset) + encoded.payload[offset:offset + 32]
+            self.assertEqual(self.packet(data)[2], 0)
+        return self.packet(struct.pack('<BI', 3, session))
+
+    def test_full_frame_crc_and_lcd_confirmation_are_separate(self):
+        fw_zigbee.firmware_run(4000)
+        reply = self.send_frame(bytes(range(256)) * 16)
+        self.assertEqual(reply[7], 2)
+        self.assertTrue(reply[15] & 1)  # Pending LCD write.
+        self.assertEqual(fw_zigbee.firmware_frames(), 1)
+        fw_zigbee.firmware_run(0)
+        reply = self.packet(struct.pack('<BI', 4, 123))
+        self.assertEqual(reply[15], 2)
+        self.assertEqual(int.from_bytes(reply[16:20], 'little'), 123)
+        self.assertEqual(fw_zigbee.firmware_frames(), 2)
+        self.packet(struct.pack('<BI', 3, 123))
+        fw_zigbee.firmware_run(0)
+        self.assertEqual(fw_zigbee.firmware_frames(), 2)
+
+    def test_old_session_packets_and_bad_crc_do_not_render(self):
+        fw_zigbee.firmware_run(4000)
+        self.packet(struct.pack('<BBBHII', 1, 1, 0, 4096, 567, 0))
+        before = fw_zigbee.firmware_frames()
+        for command in (struct.pack('<BIH', 2, 123, 0) + b'bad', struct.pack('<BI', 3, 123)):
+            reply = self.packet(command)
+            self.assertEqual(reply[2], 3)
+            self.assertEqual(reply[8:10], b'\0\0')
+        reply = self.send_frame(b'\xff' * 4096, session=567, bad_crc=True)
+        self.assertEqual(reply[2], 4)
+        self.assertEqual(reply[14], 5)
+        fw_zigbee.firmware_run(0)
+        self.assertEqual(fw_zigbee.firmware_frames(), before)
+
+    def test_malformed_requests_leave_receiver_unchanged(self):
+        fw_zigbee.firmware_run(4000)
+        for packet in (b'', b'\x01', b'\x02\0\0\0\0\0\0', b'\x03', b'\x04\0',
+                       b'\x05' + bytes(4), b'\x02' + bytes(39), bytes(300)):
+            self.assertEqual(self.packet(packet)[2], 2)
+        self.assertEqual(self.packet(struct.pack('<BI', 4, 0))[7], 0)
+
+    def test_pending_verified_frame_cannot_be_replaced_by_new_begin_or_pattern(self):
+        fw_zigbee.firmware_run(4000)
+        self.send_frame(b'\x00' * 4096)
+        reply = self.packet(struct.pack('<BBBHII', 1, 1, 0, 4096, 999, 0))
+        self.assertEqual(reply[2], 1)
+        fw_zigbee.firmware_pattern(0)
+        fw_zigbee.firmware_run(0)
+        self.assertEqual(fw_zigbee.firmware_word(fw_zigbee.firmware_words() - 1), 0x100)
+        self.assertEqual(int.from_bytes(self.packet(struct.pack('<BI', 4, 0))[16:20], 'little'), 123)
+
+    def test_retry_same_frame_after_diagnostic_restores_image(self):
+        fw_zigbee.firmware_run(4000)
+        self.send_frame(b'\x00' * 4096)
+        fw_zigbee.firmware_run(0)
+        fw_zigbee.firmware_pattern(0)
+        fw_zigbee.firmware_run(0)
+        before = fw_zigbee.firmware_frames()
+        self.assertFalse(self.packet(struct.pack('<BI', 4, 0))[15] & 2)
+        self.send_frame(b'\x00' * 4096)
+        fw_zigbee.firmware_run(0)
+        self.assertEqual(fw_zigbee.firmware_frames(), before + 1)
+        self.assertEqual(fw_zigbee.firmware_word(fw_zigbee.firmware_words() - 1), 0x100)
+
+    def test_pattern_is_queued_then_rendered_and_driver_returns_to_idle(self):
+        fw_zigbee.firmware_run(4000)
+        self.assertEqual(fw_zigbee.firmware_frames(), 1)
+        before = fw_zigbee.firmware_words()
+        self.assertEqual(fw_zigbee.firmware_pattern(0), 1)
+        self.assertEqual(fw_zigbee.firmware_words(), before)
+        fw_zigbee.firmware_run(0)
+        self.assertEqual(fw_zigbee.firmware_frames(), 2)
+        rendered = [fw_zigbee.firmware_word(i) for i in
+                    range(fw_zigbee.firmware_words() - 4096, fw_zigbee.firmware_words())]
+        self.assertEqual(rendered, [0x1FF] * 4096)
+        before = fw_zigbee.firmware_loops()
+        fw_zigbee.firmware_run(60_000)
+        self.assertEqual(fw_zigbee.firmware_loops(), before)
+        self.assertEqual(fw_zigbee.firmware_adv_attempts(), 0)
+
+    def test_latest_command_before_lcd_ready_wins(self):
+        fw_zigbee.firmware_pattern(0)
+        fw_zigbee.firmware_pattern(1)
+        fw_zigbee.firmware_run(100)
+        self.assertEqual(fw_zigbee.firmware_words(), 0)
+        fw_zigbee.firmware_run(4000)
+        self.assertEqual(fw_zigbee.firmware_frames(), 1)
+        rendered = [fw_zigbee.firmware_word(i) for i in
+                    range(fw_zigbee.firmware_words() - 4096, fw_zigbee.firmware_words())]
+        self.assertEqual(rendered, [0x100] * 4096)
+
+    def test_invalid_command_and_command_during_loop_disable(self):
+        fw_zigbee.firmware_run(4000)
+        before = fw_zigbee.firmware_loops()
+        for pattern in (4, 255, 256):
+            self.assertEqual(fw_zigbee.firmware_pattern(pattern), 0)
+        fw_zigbee.firmware_run(0)
+        self.assertEqual(fw_zigbee.firmware_loops(), before)
+        fw_zigbee.firmware_race_pattern(3)
+        fw_zigbee.firmware_run(0)
+        self.assertEqual(fw_zigbee.firmware_frames(), 2)
+        self.assertEqual(fw_zigbee.firmware_word(fw_zigbee.firmware_words() - 1), 0x10F)
+        self.assertEqual(fw_zigbee.firmware_adv_attempts(), 0)
+
+    def test_battery_sampling_works_without_bluetooth(self):
+        self.assertEqual(fw_zigbee.firmware_battery_mv(), 0xFFFF)
+        fw_zigbee.firmware_run(1000)
+        self.assertEqual(fw_zigbee.firmware_battery_mv(), 4200)
+        for _ in range(20):
+            fw_zigbee.firmware_battery_mv()
+        self.assertEqual(fw_zigbee.firmware_adc_reads(), 1)
+        fw_zigbee.firmware_adc_value(3072, 0)
+        fw_zigbee.firmware_run(300_000)
+        self.assertEqual(fw_zigbee.firmware_battery_mv(), 3600)
+        self.assertEqual(fw_zigbee.firmware_adc_reads(), 2)
+        self.assertEqual(fw_zigbee.firmware_adv_attempts(), 0)
 
 
 class Client:

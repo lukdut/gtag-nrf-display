@@ -12,3 +12,5 @@ habluetooth==6.26.11
 # The Bluetooth integration depends on USB discovery.
 aiousbwatcher==1.1.2
 serialx==1.10.0
+# Optional HA MQTT transport for the Zigbee2MQTT profile.
+paho-mqtt==2.1.0

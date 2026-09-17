@@ -14,8 +14,14 @@ jobs:
     needs: tests
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: ble
+            device: nrf-gtag-display
+          - profile: zigbee
+            device: nrf-gtag-zigbee
     env:
       ESPHOME_SDK_NRF_PREFIX: ${{ github.workspace }}/.nrf-sdk
     steps:
@@ -25,48 +31,63 @@ jobs:
       - name: Verify release version
         env:
           RELEASE_REF: ${{ github.ref_name }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          version = json.loads(Path("custom_components/gtag_ble_test/manifest.json").read_text())["version"]
-          tag = f"v{version}"
-          assert os.environ["RELEASE_REF"] == tag, "Run this workflow on the release tag"
-          assert Path(f"docs/releases/{version}.md").is_file()
-          assert f"ref: {tag}" in Path("config/esphome/packages/ble.yaml").read_text()
-          assert f"@{tag}" in Path("config/esphome/gtag-ble.yaml").read_text()
-          PY
+        run: python3 scripts/check_release.py --tag "$RELEASE_REF"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: .github/workflows/release.yml
-      - run: python -m pip install esphome==2026.8.2
+      - run: python -m pip install esphome==2026.9.0
       - uses: actions/cache@v4
         with:
           path: .nrf-sdk
-          key: nrf-sdk-${{ runner.os }}-${{ runner.arch }}-2.9.2-esphome-2026.8.2
+          key: nrf-sdk-${{ runner.os }}-${{ runner.arch }}-2.9.2-esphome-2026.9.0
       - name: Build the public ESPHome configuration
-        run: esphome compile config/esphome/gtag-ble.yaml
-      - name: Package artifacts
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: esphome compile "config/esphome/gtag-$PROFILE.yaml"
+      - name: Package firmware and ESPHome sources
+        env:
+          PROFILE: ${{ matrix.profile }}
+          DEVICE: ${{ matrix.device }}
         run: |
-          mkdir -p dist
-          cp config/esphome/.esphome/build/nrf-gtag-display/.pioenvs/nrf-gtag-display/zephyr/zephyr.uf2 dist/gtag-display.uf2
-          python scripts/package.py
+          python scripts/package_firmware.py --profile "$PROFILE" \
+            --uf2 "config/esphome/.esphome/build/$DEVICE/.pioenvs/$DEVICE/zephyr/zephyr.uf2"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.profile }}
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    needs: firmware
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          path: dist
+          merge-multiple: true
+      - name: Package integration and checksums
+        run: python3 scripts/package_release.py
       - uses: actions/upload-artifact@v4
         with:
           name: gtag-release
-          path: |
-            dist/gtag-display.uf2
-            dist/gtag-ha-integration.zip
-            dist/SHA256SUMS
+          path: dist/*
           if-no-files-found: error
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REF: ${{ github.ref_name }}
         run: |
-          gh release create "$RELEASE_REF" \
-            dist/gtag-display.uf2 dist/gtag-ha-integration.zip dist/SHA256SUMS \
+          release_args=()
+          if [[ "$RELEASE_REF" == *-* ]]; then
+            release_args+=(--prerelease --latest=false)
+          fi
+          gh release create "$RELEASE_REF" dist/* \
             --verify-tag --title "GTag Display $RELEASE_REF" \
-            --notes-file "docs/releases/${RELEASE_REF#v}.md"
+            --notes-file "docs/releases/${RELEASE_REF#v}.md" "${release_args[@]}"

@@ -8,6 +8,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
 #include "frame_protocol.h"
+#include "zigbee_protocol.h"
 
 namespace esphome {
 namespace gtag_display {
@@ -33,6 +34,14 @@ class GTagDisplay : public Component {
   void get_status(uint8_t out[8]) const { receiver_.status(out); }
   // Millivolts, or 0xFFFF when disabled, not yet sampled, or ADC failed.
   uint16_t battery_mv() const { return battery_mv_.load(); }
+#ifdef USE_GTAG_ZIGBEE
+  // Queue a diagnostic command; LCD GPIO is only touched by the main loop.
+  // 0 white, 1 black, 2 checkerboard, 3 stripes.
+  bool request_test_pattern(uint8_t pattern);
+  uint32_t rendered_frames() const { return frames_; }
+  // Called only from the ESPHome main loop, never directly by ZBOSS.
+  void process_zigbee_packet(const uint8_t *data, size_t len, uint8_t reply[zigbee_frame::REPLY_SIZE]);
+#endif
 #ifdef USE_GTAG_BATTERY
   void set_battery_calibration(float value) { battery_calibration_ = value; }
 #endif
@@ -52,7 +61,7 @@ class GTagDisplay : public Component {
 
   // BLE
   bool start_advertising_();
-  void queue_boot_pattern_();
+  void queue_pattern_(BootPattern pattern);
 
   // LCD: copied from the proven LCD3-DIRECT-01/v36 behavior.
   bool configure_pins_();
@@ -82,6 +91,13 @@ class GTagDisplay : public Component {
   std::atomic<bool> connected_{false};
   std::atomic<bool> restart_advertising_{false};
   std::atomic<bool> virtual_led_{false};
+#ifdef USE_GTAG_ZIGBEE
+  std::atomic<uint8_t> pending_pattern_{0};  // 0: none, otherwise pattern + 1.
+  uint32_t queued_frame_id_{0};
+  uint32_t rendered_frame_id_{0};
+  bool queued_verified_{false};
+  bool rendered_verified_{false};
+#endif
 
   Stage stage_{Stage::BOOT_WAIT};
   uint32_t next_ms_{0};

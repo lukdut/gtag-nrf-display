@@ -1,14 +1,16 @@
 # GTag Display — nRF52840 + Home Assistant
 
 Экран LCD 256×128 от электронного ценника G-Tag подключён к плате
-nRF52840 Pro Micro / nice!nano. Home Assistant передаёт кадр через BLE,
-прошивка проверяет CRC32 и выводит изображение после отключения клиента.
+nRF52840 Pro Micro / nice!nano. Home Assistant передаёт кадр через Bluetooth
+или Zigbee2MQTT; прошивка проверяет CRC32 и выводит изображение.
 
-В проекте одна целевая BLE-прошивка:
-[gtag-ble.yaml](config/esphome/gtag-ble.yaml) для ESPHome Device Builder и
-[nrf-gtag-display.yaml](config/esphome/nrf-gtag-display.yaml) для локальной разработки,
-с общими настройками и компонентом
-[gtag_display](config/esphome/components/gtag_display).
+В проекте два профиля с общим драйвером [gtag_display](config/esphome/components/gtag_display):
+
+| Связь | ESPHome Device Builder | Локальная разработка |
+|---|---|---|
+| Bluetooth | [gtag-ble.yaml](config/esphome/gtag-ble.yaml) | [nrf-gtag-display.yaml](config/esphome/nrf-gtag-display.yaml) |
+| Zigbee2MQTT | [gtag-zigbee.yaml](config/esphome/gtag-zigbee.yaml) | [nrf-gtag-zigbee.yaml](config/esphome/nrf-gtag-zigbee.yaml) |
+
 Интеграция HA находится в [custom_components/gtag_ble_test](custom_components/gtag_ble_test).
 Её техническое имя сохранено для совместимости с уже добавленными устройствами
 и идентификаторами сущностей; в интерфейсе она называется **GTag Display**.
@@ -28,9 +30,20 @@ GitHub автоматически. Готовый UF2 и архив ручной
 [релизах](https://github.com/lukdut/gtag-nrf-display/releases).
 [Пошаговая установка](docs/installation.md).
 
-Поддерживается **Bluetooth**. Zigbee через Zigbee2MQTT запланирован и пока не
-реализован. Общий редактор экранов и сборка через ESPHome сохранятся для обоих
-вариантов. [План развития и поддерживаемые установки HA](docs/roadmap.md).
+В стабильном релизе v0.8.0 поддерживается **Bluetooth**. Бета-версия
+**0.9.0-beta.1** добавляет [Zigbee2MQTT в общий редактор HA](docs/zigbee-home-assistant.md):
+способ связи выбирается при добавлении экрана, макеты и предпросмотр общие.
+Для Zigbee2MQTT подготовлен
+[экспериментальный профиль](docs/zigbee-prototype.md): пользователь подтвердил
+подключение, появление параметров и переключение рисунков. Следующая сборка
+передаёт полный кадр с CRC через [внешний конвертер](zigbee2mqtt/gtag-display.mjs);
+обычная и инвертированная картинки прошли передачу на физическую плату через
+Zigbee2MQTT с подтверждением CRC и записи LCD. В спящем режиме пользователь
+измерил около **50 мкА**, со всплесками до **0,4 мА** и редкими до **3 мА**;
+передача двух тестовых кадров заняла 18–33 секунды. Сборка без диагностики
+проверена после 10 и 5 минут простоя: кадры дошли за 35,225 и 16,399 секунды,
+без повторов. [Установка беты через HACS и файлы выпуска](docs/releases/0.9.0-beta.1.md).
+[План развития и поддерживаемые установки HA](docs/roadmap.md).
 
 ## Подключение
 
@@ -100,8 +113,12 @@ substitutions:
   gtag_battery_calibration: "1.0"
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.8.0
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.9.0-beta.1
 ```
+
+Для Zigbee замените `packages/ble.yaml` на `packages/zigbee.yaml` либо скопируйте
+[готовую конфигурацию](config/esphome/gtag-zigbee.yaml). Установите
+[внешний конвертер Zigbee2MQTT](zigbee2mqtt/gtag-display.mjs).
 
 Если делитель аккумулятора не установлен, добавьте:
 
@@ -116,12 +133,12 @@ gtag_display:
 [Инструкция для HA OS и HA Container](docs/installation.md).
 
 Для разработки с локальными исходниками используйте конфигурацию ниже.
-Конфигурация рассчитана на **ESPHome 2026.8.2**, **nRF Connect SDK 2.9.2**.
+Сборки бета-версии проверяются на **ESPHome 2026.9.0**, **nRF Connect SDK 2.9.2**.
 Установка и сборка из корня проекта (Python 3.12+, первая сборка скачивает SDK):
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install esphome==2026.8.2
+.venv/bin/pip install esphome==2026.9.0
 .venv/bin/esphome config config/esphome/nrf-gtag-display.yaml
 .venv/bin/esphome compile config/esphome/nrf-gtag-display.yaml
 ```
@@ -204,6 +221,20 @@ python3 -m unittest discover -s tests -v
 запуск рекламы, диагностические рисунки, повреждённый кадр и восстановление
 передачи. Эти тесты не измеряют физические фронты, радиосвязь или ток.
 Подробности: [исходная проверка протокола LCD](docs/lcd-protocol-review.md).
+
+Для Zigbee дополнительно нужны Node.js 24 и зависимости версии Zigbee2MQTT 2.12.0:
+
+```sh
+npm ci --prefix tests/zigbee --ignore-scripts --no-audit --no-fund
+npm test --prefix tests/zigbee
+```
+
+18 сценариев связывают внешний конвертер через настоящий ZCL-кодек с C++-драйвером.
+Проверяются байты изображения, CRC, потеря ответов, перезапуск и подтверждение LCD.
+Отдельно проверен настоящий обработчик входящих сообщений zigbee-herdsman,
+чтобы выявлять ошибки описания пользовательского кластера.
+Асимметричные пиксели рамки, букв и диагонали проверяют нативную упаковку
+`row-lsb`, которую одна проверка CRC переданного кадра не подтверждает.
 
 Отрисовка и интеграция дополнительно проверены 62 тестами в **Home Assistant 2026.9.2**.
 Для этого нужен отдельный Python 3.14:

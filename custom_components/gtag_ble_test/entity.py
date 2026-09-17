@@ -2,7 +2,7 @@
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.entity import Entity
 
-from .const import DOMAIN
+from .const import DOMAIN, TRANSPORT_BLE
 from .display import Display
 
 
@@ -12,10 +12,10 @@ class GTagEntity(Entity):
 
     def __init__(self, display: Display, key: str) -> None:
         self.display = display
-        self._attr_unique_id = f"{display.address}_{key}"
+        self._attr_unique_id = f"{display.identity}_{key}"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, display.address)},
-            connections={(CONNECTION_BLUETOOTH, display.address)},
+            identifiers={(DOMAIN, display.identity)},
+            connections=({(CONNECTION_BLUETOOTH, display.address)} if display.transport == TRANSPORT_BLE else set()),
             manufacturer="DIY", model="nRF52840 G-Tag Display", name=display.name,
         )
 

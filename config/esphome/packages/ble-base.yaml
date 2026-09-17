@@ -1,29 +1,13 @@
 # Shared hardware and BLE settings for local and published configurations.
+packages:
+  board: !include board.yaml
+
 substitutions:
-  gtag_name: nrf-gtag-display
-  gtag_friendly_name: NRF GTag Display
   gtag_tx_power: "0"
   gtag_advertising_interval: 1s
-  gtag_battery_calibration: "1.0"
-
-esphome:
-  name: ${gtag_name}
-  friendly_name: ${gtag_friendly_name}
-  min_version: 2026.8.2
-  on_boot:
-    priority: -100
-    then:
-      # BLE events and LCD timers wake the loop before this idle interval ends.
-      - lambda: App.set_loop_interval(1000);
-
-nrf52:
-  board: adafruit_itsybitsy_nrf52840
-  bootloader: adafruit_nrf52_sd140_v6
-  dcdc: false
-  framework:
-    version: 2.9.2
 
 gtag_display:
+  transport: ble
   tx_power: ${gtag_tx_power}
   advertising_interval: ${gtag_advertising_interval}
   boot_test_pattern: none

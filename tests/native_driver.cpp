@@ -53,6 +53,7 @@ void firmware_create(unsigned pattern, unsigned interval) {
   display->setup();
 }
 void firmware_run(unsigned ms) { run_until(sim::now_us + uint64_t(ms) * 1000); }
+#ifndef USE_GTAG_ZIGBEE
 void firmware_connect() {
   assert(sim::advertising);
   sim::advertising = false;
@@ -75,10 +76,25 @@ int firmware_data(const uint8_t *data, uint16_t len) {
 int firmware_led(const uint8_t *data, uint16_t len) {
   return write_led(nullptr, nullptr, data, len, 0, 0);
 }
+#else
+int firmware_pattern(unsigned pattern) {
+  return pattern <= 255 && display->request_test_pattern(static_cast<uint8_t>(pattern));
+}
+void firmware_race_pattern(unsigned pattern) {
+  sim::on_disable = [pattern] { firmware_pattern(pattern); };
+  display->pending_enable = true;
+}
+void firmware_packet(const uint8_t *data, unsigned len, uint8_t *reply) {
+  display->process_zigbee_packet(data, len, reply);
+}
+#endif
 void firmware_status(uint8_t *out) { display->get_status(out); }
+#ifndef USE_GTAG_ZIGBEE
 int firmware_battery(uint8_t *out, uint16_t len, uint16_t offset) {
   return read_battery(nullptr, nullptr, out, len, offset);
 }
+#endif
+unsigned firmware_battery_mv() { return display->battery_mv(); }
 void firmware_adc_value(int raw, int error) { sim::adc_raw = raw; sim::adc_error = error; }
 unsigned firmware_adc_reads() { return sim::adc_reads; }
 #ifdef USE_GTAG_BATTERY

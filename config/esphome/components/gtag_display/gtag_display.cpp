@@ -3,10 +3,12 @@
 #include <cerrno>
 #include <cstring>
 
+#ifndef USE_GTAG_ZIGBEE
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
+#endif
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
@@ -46,6 +48,7 @@ const Pin PINS[] = {
     {DEVICE_DT_GET(DT_NODELABEL(gpio1)), 13, "RESET P1.13"},
 };
 
+#ifndef USE_GTAG_ZIGBEE
 GTagDisplay *instance = nullptr;
 
 // Preserve the already proven UUIDs so the existing HA integration works
@@ -286,6 +289,7 @@ void disconnected_cb(struct bt_conn *, uint8_t reason) {
 }
 
 struct bt_conn_cb conn_callbacks = {};
+#endif
 
 }  // namespace
 
@@ -354,7 +358,13 @@ bool GTagDisplay::write_frame_chunk(
 }
 
 bool GTagDisplay::commit_frame() {
-  const bool first_commit = this->receiver_.state() != frame::State::COMPLETE;
+  bool first_commit = this->receiver_.state() != frame::State::COMPLETE;
+#ifdef USE_GTAG_ZIGBEE
+  // Restore a verified frame after a diagnostic pattern without redrawing
+  // duplicate COMMITs while that frame is pending or already displayed.
+  first_commit |= (!this->frame_pending_.load() || !this->queued_verified_) &&
+      (!this->rendered_verified_ || this->rendered_frame_id_ != this->receiver_.descriptor().frame_id);
+#endif
   if (!this->receiver_.commit(
           this->decoded_frame_.data(),
           this->decoded_frame_.size())) {
@@ -374,6 +384,10 @@ bool GTagDisplay::commit_frame() {
 
   if (first_commit) {
     std::memcpy(this->display_frame_.data(), this->decoded_frame_.data(), FRAME_BYTES);
+#ifdef USE_GTAG_ZIGBEE
+    this->queued_frame_id_ = this->receiver_.descriptor().frame_id;
+    this->queued_verified_ = true;
+#endif
     this->frame_pending_.store(true);
     this->enable_loop_soon_any_context();
   }
@@ -389,6 +403,7 @@ bool GTagDisplay::commit_frame() {
 }
 
 
+#ifndef USE_GTAG_ZIGBEE
 bool GTagDisplay::start_advertising_() {
   // BLE uses 0.625 ms units. Round up to avoid advertising more frequently
   // than configured. ONE_TIME leaves restart after disconnect to loop(), so
@@ -412,14 +427,72 @@ bool GTagDisplay::start_advertising_() {
   ESP_LOGW(TAG, "Advertising failed: %d; retry in 1s", err);
   return false;
 }
+#endif
 
-void GTagDisplay::queue_boot_pattern_() {
-  if (this->boot_pattern_ == BootPattern::NONE)
+#ifdef USE_GTAG_ZIGBEE
+bool GTagDisplay::request_test_pattern(uint8_t pattern) {
+  if (pattern > 3)
+    return false;
+  this->pending_pattern_.store(pattern + 1);
+  this->enable_loop_soon_any_context();
+  return true;
+}
+
+void GTagDisplay::process_zigbee_packet(const uint8_t *data, size_t len,
+                                      uint8_t reply[zigbee_frame::REPLY_SIZE]) {
+  using namespace zigbee_frame;
+  Result result = Result::INVALID;
+  const uint8_t command = data != nullptr && len > 0 ? data[0] : 0;
+  if (data != nullptr && len > 0 && len <= MAX_PACKET_SIZE && !this->is_failed()) {
+    if (command == uint8_t(Command::BEGIN) && len == 13) {
+      frame::Descriptor descriptor{};
+      descriptor.version = data[1];
+      descriptor.codec = static_cast<frame::Codec>(data[2]);
+      descriptor.encoded_size = read16(data + 3);
+      descriptor.frame_id = read32(data + 5);
+      descriptor.raw_crc32 = read32(data + 9);
+      if (this->frame_pending_.load() && !(descriptor == this->receiver_.descriptor())) {
+        result = Result::BUSY;
+      } else {
+        result = this->begin_frame(descriptor) == frame::BeginResult::REJECTED ? Result::RECEIVER : Result::OK;
+      }
+    } else if ((command == uint8_t(Command::DATA) && len >= 8) ||
+               ((command == uint8_t(Command::COMMIT) || command == uint8_t(Command::STATUS)) && len == 5)) {
+      const uint32_t session = read32(data + 1);
+      if (command == uint8_t(Command::STATUS)) {
+        result = Result::OK;
+      } else if (this->receiver_.state() == frame::State::IDLE ||
+                 session != this->receiver_.descriptor().frame_id) {
+        result = Result::SESSION;
+      } else if (command == uint8_t(Command::DATA)) {
+        result = this->write_frame_chunk(read16(data + 5), data + 7, len - 7) ? Result::OK : Result::RECEIVER;
+      } else {
+        result = this->commit_frame() ? Result::OK : Result::RECEIVER;
+      }
+    }
+  }
+  std::memset(reply, 0, REPLY_SIZE);
+  reply[0] = VERSION;
+  reply[1] = command;
+  reply[2] = uint8_t(result);
+  write32(reply + 3, this->receiver_.descriptor().frame_id);
+  this->get_status(reply + 7);
+  reply[15] = (this->frame_pending_.load() ? FLAG_PENDING : 0) |
+              (this->rendered_verified_ ? FLAG_RENDERED : 0);
+  write32(reply + 16, this->rendered_frame_id_);
+}
+#endif
+
+void GTagDisplay::queue_pattern_(BootPattern pattern) {
+  if (pattern == BootPattern::NONE)
     return;
+#ifdef USE_GTAG_ZIGBEE
+  this->queued_verified_ = false;
+#endif
 
   for (size_t i = 0; i < FRAME_BYTES; ++i) {
     uint8_t value = 0xFF;
-    switch (this->boot_pattern_) {
+    switch (pattern) {
       case BootPattern::BLACK: value = 0x00; break;
       case BootPattern::CHECKERBOARD:
         value = ((((i / 32) / 8) + (i % 32)) & 1U) ? 0x00 : 0xFF;
@@ -695,7 +768,7 @@ void GTagDisplay::service_lcd_() {
         this->stage_ = Stage::READY;
         ESP_LOGI(
             TAG,
-            "LCD READY; waiting for verified BLE frame");
+            "LCD READY");
         break;
 
       case Stage::READY:
@@ -709,17 +782,25 @@ void GTagDisplay::service_lcd_() {
       !this->connected_.load() &&
       this->frame_pending_.exchange(false)) {
 
+#ifndef USE_GTAG_ZIGBEE
     this->restart_advertising_.store(false);
+#endif
 
     if (!this->send_frame_(this->display_frame_.data())) {
       ESP_LOGE(TAG, "LCD frame render failed");
       this->frame_pending_.store(true);
     } else {
-      ESP_LOGI(TAG, "BLE frame rendered on LCD");
+#ifdef USE_GTAG_ZIGBEE
+      this->rendered_verified_ = this->queued_verified_;
+      this->rendered_frame_id_ = this->queued_frame_id_;
+#endif
+      ESP_LOGI(TAG, "Frame rendered on LCD");
     }
 
     // Advertise again only after the LCD burst is complete.
+#ifndef USE_GTAG_ZIGBEE
     this->restart_advertising_.store(true);
+#endif
   }
 }
 
@@ -780,7 +861,9 @@ void GTagDisplay::sample_battery_() {
 #endif
 
 void GTagDisplay::setup() {
+#ifndef USE_GTAG_ZIGBEE
   instance = this;
+#endif
 
   ESP_LOGI(
       TAG,
@@ -791,8 +874,9 @@ void GTagDisplay::setup() {
     return;
   }
 
-  this->queue_boot_pattern_();
+  this->queue_pattern_(this->boot_pattern_);
 
+#ifndef USE_GTAG_ZIGBEE
   const int err = bt_enable(nullptr);
 
   if (err != 0 && err != -EALREADY) {
@@ -806,6 +890,7 @@ void GTagDisplay::setup() {
   bt_conn_cb_register(&conn_callbacks);
 
   this->restart_advertising_.store(true);
+#endif
 
   // Preserve the initial v36 boot wait before RESET.
   this->wait_(Stage::BOOT_WAIT, 3000);
@@ -814,7 +899,7 @@ void GTagDisplay::setup() {
   this->set_timeout("battery_sample", 1000, [this]() { this->sample_battery_(); });
 #endif
 
-  ESP_LOGI(TAG, "Bluetooth initialized; LCD startup scheduled");
+  ESP_LOGI(TAG, "LCD startup scheduled");
 }
 
 void GTagDisplay::loop() {
@@ -827,10 +912,19 @@ void GTagDisplay::loop() {
   // Zephyr may enter System ON sleep whenever all threads are waiting.
   this->disable_loop();
 
+#ifdef USE_GTAG_ZIGBEE
+  const uint8_t requested = this->pending_pattern_.exchange(0);
+  // Do not let a UI diagnostic overwrite an active or just-committed frame.
+  if (requested != 0 && this->receiver_.state() != frame::State::RECEIVING &&
+      !(this->frame_pending_.load() && this->queued_verified_))
+    this->queue_pattern_(static_cast<BootPattern>(requested));
+#endif
+
   // If a committed frame is waiting after disconnect, render it before
   // restarting advertising. This keeps LCD SPI isolated from GATT traffic.
   this->service_lcd_();
 
+#ifndef USE_GTAG_ZIGBEE
   if (this->restart_advertising_.load() &&
       !this->connected_.load() &&
       !this->frame_pending_.load() &&
@@ -845,12 +939,17 @@ void GTagDisplay::loop() {
       this->cancel_timeout("advertising_retry");
     }
   }
+#endif
 }
 
 void GTagDisplay::dump_config() {
+#ifdef USE_GTAG_ZIGBEE
+  ESP_LOGCONFIG(TAG, "GTag Display; Zigbee frame transport v1, diagnostics and battery");
+#else
   ESP_LOGCONFIG(
       TAG,
       "GTag Display; protocol-v1 codecs RAW/WHITE_RLE_V1; UUIDs 0011..0016");
+#endif
 #ifdef USE_GTAG_BATTERY
   ESP_LOGCONFIG(TAG, "  Battery: P0.31/AIN7, 1M/1M divider, 5min, calibration=%.4f",
                 this->battery_calibration_);
@@ -858,9 +957,14 @@ void GTagDisplay::dump_config() {
   ESP_LOGCONFIG(TAG, "  Battery measurement disabled");
 #endif
 
+#ifndef USE_GTAG_ZIGBEE
   ESP_LOGCONFIG(TAG, "  Power saving: System ON idle; BLE remains connectable");
   ESP_LOGCONFIG(TAG, "  Advertising interval: %u ms; boot pattern: %u",
                 unsigned(this->advertising_interval_ms_), unsigned(this->boot_pattern_));
+#else
+  ESP_LOGCONFIG(TAG, "  Zigbee radio/sleep managed by the zigbee component; boot pattern: %u",
+                unsigned(this->boot_pattern_));
+#endif
 
   ESP_LOGCONFIG(
       TAG,

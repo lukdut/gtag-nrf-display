@@ -1,4 +1,7 @@
 DOMAIN = "gtag_ble_test"
+CONF_TRANSPORT = "transport"
+TRANSPORT_BLE = "ble"
+TRANSPORT_ZIGBEE = "zigbee"
 
 SERVICE_UUID = "7a1e0011-6b5b-4f6d-8d6e-0f4f47544147"
 LED_CHAR_UUID = "7a1e0012-6b5b-4f6d-8d6e-0f4f47544147"

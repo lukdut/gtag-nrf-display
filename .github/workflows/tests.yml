@@ -26,5 +26,15 @@ jobs:
         run: python -m pytest tests/ha
       - name: Firmware protocol and sender
         run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/zigbee/package-lock.json
+      - run: npm ci --prefix tests/zigbee --ignore-scripts --no-audit --no-fund
+      - name: Zigbee converter and firmware interoperability
+        run: npm test --prefix tests/zigbee
       - name: Build installation archive
         run: python scripts/package.py
+      - name: Check release metadata
+        run: python scripts/check_release.py
