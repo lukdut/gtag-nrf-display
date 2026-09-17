@@ -30,3 +30,7 @@ gtag_display:
   tx_power: 0
   advertising_interval: 1s
   boot_test_pattern: none
+  # LiPo 1S: B+ -- 1M -- P0.31 -- 1M -- B-/GND; 100nF from P0.31 to GND.
+  # Remove this block to build without battery measurements.
+  battery_voltage:
+    calibration: 1.0

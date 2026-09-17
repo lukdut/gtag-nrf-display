@@ -14,6 +14,10 @@
 #include <zephyr/kernel.h>
 
 #include <hal/nrf_gpio.h>
+#ifdef USE_GTAG_BATTERY
+#include <zephyr/drivers/adc.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+#endif
 
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
@@ -56,12 +60,23 @@ GTagDisplay *instance = nullptr;
   BT_UUID_128_ENCODE(0x7a1e0014, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
 #define BT_UUID_GTAG_CONTROL_VAL \
   BT_UUID_128_ENCODE(0x7a1e0015, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
+#define BT_UUID_GTAG_BATTERY_VAL \
+  BT_UUID_128_ENCODE(0x7a1e0016, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
 
 #define BT_UUID_GTAG_SERVICE BT_UUID_DECLARE_128(BT_UUID_GTAG_SERVICE_VAL)
 #define BT_UUID_GTAG_LED BT_UUID_DECLARE_128(BT_UUID_GTAG_LED_VAL)
 #define BT_UUID_GTAG_FRAME BT_UUID_DECLARE_128(BT_UUID_GTAG_FRAME_VAL)
 #define BT_UUID_GTAG_STATUS BT_UUID_DECLARE_128(BT_UUID_GTAG_STATUS_VAL)
 #define BT_UUID_GTAG_CONTROL BT_UUID_DECLARE_128(BT_UUID_GTAG_CONTROL_VAL)
+#define BT_UUID_GTAG_BATTERY BT_UUID_DECLARE_128(BT_UUID_GTAG_BATTERY_VAL)
+
+ssize_t read_battery(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                    void *buf, uint16_t len, uint16_t offset) {
+  // GATT reads the cache only: no ADC work on the Bluetooth thread.
+  const uint16_t mv = instance != nullptr ? instance->battery_mv() : 0xFFFF;
+  const uint8_t value[] = {uint8_t(mv), uint8_t(mv >> 8)};
+  return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(value));
+}
 
 uint16_t read_le16(const uint8_t *p) {
   return uint16_t(p[0]) | (uint16_t(p[1]) << 8);
@@ -229,6 +244,14 @@ BT_GATT_SERVICE_DEFINE(
         BT_GATT_PERM_WRITE,
         nullptr,
         write_control,
+        nullptr),
+
+    BT_GATT_CHARACTERISTIC(
+        BT_UUID_GTAG_BATTERY,
+        BT_GATT_CHRC_READ,
+        BT_GATT_PERM_READ,
+        read_battery,
+        nullptr,
         nullptr));
 
 const struct bt_data ad[] = {
@@ -705,6 +728,57 @@ void GTagDisplay::service_lcd_() {
 // Component lifecycle
 // ---------------------------------------------------------------------------
 
+#ifdef USE_GTAG_BATTERY
+void GTagDisplay::setup_battery_() {
+  const auto *adc_dev = DEVICE_DT_GET(DT_NODELABEL(adc));
+  if (!device_is_ready(adc_dev)) {
+    ESP_LOGW(TAG, "Battery ADC unavailable");
+    return;
+  }
+  // Disconnect the digital input buffer and pulls; SAADC still reads AIN7.
+  int err = gpio_pin_configure(DEVICE_DT_GET(DT_NODELABEL(gpio0)), 31, GPIO_DISCONNECTED);
+  struct adc_channel_cfg channel = {};
+  channel.gain = ADC_GAIN_1_4;  // Internal 0.6V reference / gain = 2.4V full scale.
+  channel.reference = ADC_REF_INTERNAL;
+  // The 1M/1M divider has a 500k source resistance: use the longest acquisition.
+  channel.acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40);
+  channel.channel_id = 0;
+  channel.input_positive = NRF_SAADC_AIN7;
+  if (err == 0)
+    err = adc_channel_setup(adc_dev, &channel);
+  this->battery_adc_ready_ = err == 0;
+  if (err != 0)
+    ESP_LOGW(TAG, "Battery ADC setup failed: %d", err);
+}
+
+void GTagDisplay::sample_battery_() {
+  if (!this->battery_adc_ready_)
+    this->setup_battery_();
+  int16_t raw = 0;
+  struct adc_sequence sequence = {};
+  sequence.channels = BIT(0);
+  sequence.buffer = &raw;
+  sequence.buffer_size = sizeof(raw);
+  sequence.resolution = 12;
+  sequence.oversampling = 4;  // Average 16 conversions in one burst.
+  sequence.calibrate = true;
+  const int err = this->battery_adc_ready_
+      ? adc_read(DEVICE_DT_GET(DT_NODELABEL(adc)), &sequence) : -ENODEV;
+  if (err != 0 || raw >= 4095) {
+    this->battery_mv_.store(0xFFFF);
+    ESP_LOGW(TAG, "Battery sample invalid: ADC error=%d raw=%d", err, int(raw));
+  } else {
+    // 0.6V reference, gain 1/4, 12 bits, external divider x2.
+    const float mv = (raw > 0 ? raw : 0) * (4800.0f / 4096.0f) * this->battery_calibration_;
+    this->battery_mv_.store(static_cast<uint16_t>(mv + 0.5f));
+    ESP_LOGI(TAG, "Battery: %u mV", unsigned(this->battery_mv()));
+  }
+  // Zephyr's nRF SAADC driver stops and disables the ADC after adc_read().
+  // This timer wakes the scheduler once per five minutes, with no polling loop.
+  this->set_timeout("battery_sample", 300000, [this]() { this->sample_battery_(); });
+}
+#endif
+
 void GTagDisplay::setup() {
   instance = this;
 
@@ -735,6 +809,10 @@ void GTagDisplay::setup() {
 
   // Preserve the initial v36 boot wait before RESET.
   this->wait_(Stage::BOOT_WAIT, 3000);
+#ifdef USE_GTAG_BATTERY
+  // 1M || 1M with 100nF settles in ~250ms (5 tau); allow 1s after boot.
+  this->set_timeout("battery_sample", 1000, [this]() { this->sample_battery_(); });
+#endif
 
   ESP_LOGI(TAG, "Bluetooth initialized; LCD startup scheduled");
 }
@@ -772,7 +850,13 @@ void GTagDisplay::loop() {
 void GTagDisplay::dump_config() {
   ESP_LOGCONFIG(
       TAG,
-      "GTag Display; protocol-v1 codecs RAW/WHITE_RLE_V1; UUIDs 0011..0015");
+      "GTag Display; protocol-v1 codecs RAW/WHITE_RLE_V1; UUIDs 0011..0016");
+#ifdef USE_GTAG_BATTERY
+  ESP_LOGCONFIG(TAG, "  Battery: P0.31/AIN7, 1M/1M divider, 5min, calibration=%.4f",
+                this->battery_calibration_);
+#else
+  ESP_LOGCONFIG(TAG, "  Battery measurement disabled");
+#endif
 
   ESP_LOGCONFIG(TAG, "  Power saving: System ON idle; BLE remains connectable");
   ESP_LOGCONFIG(TAG, "  Advertising interval: %u ms; boot pattern: %u",

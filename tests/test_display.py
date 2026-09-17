@@ -52,7 +52,7 @@ class Entity:
 module("bleak", BleakClient=object)
 module("bleak.exc", BleakError=BleakError,
        BleakCharacteristicNotFoundError=BleakCharacteristicNotFoundError)
-module("bleak_retry_connector", establish_connection=None)
+module("bleak_retry_connector", establish_connection=None, BleakClientWithServiceCache=object)
 module("homeassistant")
 module("homeassistant.components")
 module("homeassistant.components.bluetooth")
@@ -73,29 +73,37 @@ logging.getLogger(transport.__name__).setLevel(logging.CRITICAL)
 
 
 def setUpModule():
-    global build, fw
+    global build, fw, fw_without_battery
     build = tempfile.TemporaryDirectory(prefix="gtag-tests-")
     path = Path(build.name)
     # Redirect platform includes to the host model, without editing the driver.
     headers = [
         "esphome/core/component.h", "esphome/core/application.h",
-        "esphome/core/hal.h", "esphome/core/log.h",
+        "esphome/core/hal.h", "esphome/core/log.h", "esphome/core/defines.h",
         "zephyr/bluetooth/bluetooth.h", "zephyr/bluetooth/conn.h",
         "zephyr/bluetooth/gatt.h", "zephyr/bluetooth/uuid.h", "zephyr/device.h",
         "zephyr/devicetree.h", "zephyr/drivers/gpio.h",
         "zephyr/dt-bindings/gpio/nordic-nrf-gpio.h", "zephyr/kernel.h", "hal/nrf_gpio.h",
+        "zephyr/drivers/adc.h", "zephyr/dt-bindings/adc/nrf-saadc.h",
     ]
     for header in headers:
         target = path / header
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('#include "native_stubs.h"\n')
     library = path / "driver.so"
-    subprocess.run([
+    command = [
         "g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fPIC", "-shared",
         "-I", str(path), "-I", str(ROOT / "tests"), "-I", str(COMPONENT),
-        str(ROOT / "tests/native_driver.cpp"), "-o", str(library),
-    ], check=True)
+        str(ROOT / "tests/native_driver.cpp"),
+    ]
+    subprocess.run([*command, "-DUSE_GTAG_BATTERY", "-o", str(library)], check=True)
+    disabled_library = path / "driver_without_battery.so"
+    subprocess.run([*command, "-o", str(disabled_library)], check=True)
     fw = ctypes.CDLL(str(library))
+    fw_without_battery = ctypes.CDLL(str(disabled_library))
+    fw.firmware_calibration.argtypes = [ctypes.c_float]
+    for variant in (fw, fw_without_battery):
+        variant.firmware_battery.argtypes = [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16]
     for name in ("control", "data", "led"):
         getattr(fw, f"firmware_{name}").argtypes = [ctypes.c_char_p, ctypes.c_uint16]
     fw.firmware_status.argtypes = [ctypes.c_void_p]
@@ -140,6 +148,65 @@ def commit():
 class DisplayTests(unittest.TestCase):
     def setUp(self):
         start()
+
+    def test_battery_cache_sampling_errors_and_recovery(self):
+        fw.firmware_create(0, 1000)
+        out = ctypes.create_string_buffer(2)
+        self.assertEqual(fw.firmware_battery(out, 2, 0), 2)
+        self.assertEqual(out.raw, b"\xff\xff")
+        fw.firmware_run(999)
+        self.assertEqual(fw.firmware_adc_reads(), 0)
+        fw.firmware_run(1)
+        fw.firmware_battery(out, 2, 0)
+        self.assertEqual(int.from_bytes(out.raw, "little"), 4200)
+        for _ in range(100):
+            fw.firmware_battery(out, 2, 0)
+        self.assertEqual(fw.firmware_adc_reads(), 1)
+        fw.firmware_adc_value(3072, 0)  # 1.8V at the input.
+        fw.firmware_run(299_999)
+        self.assertEqual(fw.firmware_adc_reads(), 1)
+        fw.firmware_run(1)
+        fw.firmware_battery(out, 2, 0)
+        self.assertEqual(int.from_bytes(out.raw, "little"), 3600)
+        fw.firmware_adc_value(3072, -5)
+        fw.firmware_run(300_000)
+        fw.firmware_battery(out, 2, 0)
+        self.assertEqual(out.raw, b"\xff\xff")
+        fw.firmware_adc_value(3072, 0)
+        fw.firmware_calibration(1.01)
+        fw.firmware_run(300_000)
+        fw.firmware_battery(out, 2, 0)
+        self.assertEqual(int.from_bytes(out.raw, "little"), 3636)
+        fw.firmware_adc_value(4095, 0)
+        fw.firmware_run(300_000)
+        fw.firmware_battery(out, 2, 0)
+        self.assertEqual(out.raw, b"\xff\xff")
+        self.assertTrue(fw.firmware_advertising())
+
+    def test_battery_disabled_build_never_samples(self):
+        fw_without_battery.firmware_create(0, 1000)
+        fw_without_battery.firmware_run(900_000)
+        out = ctypes.create_string_buffer(2)
+        fw_without_battery.firmware_battery(out, 2, 0)
+        self.assertEqual(out.raw, b"\xff\xff")
+        self.assertEqual(fw_without_battery.firmware_adc_reads(), 0)
+
+    def test_battery_gatt_offsets_and_reads_during_connection(self):
+        fw.firmware_connect()
+        out = ctypes.create_string_buffer(1)
+        self.assertEqual(fw.firmware_battery(out, 1, 0), 1)
+        self.assertEqual(out.raw, (4200).to_bytes(2, "little")[:1])
+        self.assertEqual(fw.firmware_battery(out, 1, 1), 1)
+        self.assertEqual(out.raw, (4200).to_bytes(2, "little")[1:])
+        self.assertEqual(fw.firmware_battery(out, 1, 2), 0)
+        self.assertLess(fw.firmware_battery(out, 1, 3), 0)
+        before = fw.firmware_words()
+        fw.firmware_run(300_000)
+        self.assertEqual(fw.firmware_words(), before)
+        self.assertEqual(fw.firmware_adc_reads(), 2)
+        fw.firmware_disconnect()
+        fw.firmware_run(0)
+        self.assertTrue(fw.firmware_advertising())
 
     def test_idle_has_no_component_polling(self):
         before = fw.firmware_loops()

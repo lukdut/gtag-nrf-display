@@ -1,5 +1,8 @@
 {
   "title": "GTag Display",
+  "entity": {
+    "sensor": {"battery_voltage": {"name": "Напряжение аккумулятора"}}
+  },
   "config": {
     "step": {
       "confirm": {"title": "Добавить {name}?", "description": "Добавить экран G-Tag, подключённый через nRF52840."},

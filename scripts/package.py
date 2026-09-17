@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     component = root / "custom_components" / "gtag_ble_test"
-    for required in ("manifest.json", "services.yaml", "layouts.py",
+    for required in ("manifest.json", "services.yaml", "layouts.py", "battery.py",
                      "fonts/DejaVuSans.ttf", "fonts/LICENSE.txt",
                      "translations/en.json", "translations/ru.json", "brand/icon.png"):
         if not (component / required).is_file():

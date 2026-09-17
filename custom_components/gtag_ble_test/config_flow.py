@@ -144,7 +144,10 @@ class GTagOptionsFlow(OptionsFlow):
 
     async def async_step_values(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         registry = er.async_get(self.hass)
-        excluded = [item.entity_id for item in registry.entities.values() if item.platform == DOMAIN]
+        excluded = [item.entity_id for item in registry.entities.values()
+                    if item.platform == DOMAIN and not (
+                        item.domain == "sensor" and item.translation_key == "battery_voltage"
+                    )]
         fields = {}
         count = value_count(self._settings["preset"])
         for index in range(1, count + 1):

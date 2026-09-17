@@ -1,5 +1,8 @@
 {
   "title": "GTag Display",
+  "entity": {
+    "sensor": {"battery_voltage": {"name": "Battery voltage"}}
+  },
   "config": {
     "step": {
       "confirm": {

@@ -23,6 +23,8 @@ MULTI_CONF = False
 CONF_TX_POWER = "tx_power"
 CONF_ADVERTISING_INTERVAL = "advertising_interval"
 CONF_BOOT_TEST_PATTERN = "boot_test_pattern"
+CONF_BATTERY_VOLTAGE = "battery_voltage"
+CONF_CALIBRATION = "calibration"
 
 ns = cg.esphome_ns.namespace("gtag_display")
 GTagDisplay = ns.class_("GTagDisplay", cg.Component)
@@ -47,6 +49,10 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_TX_POWER, default=0): cv.one_of(0, 4, 8, int=True),
     cv.Optional(CONF_ADVERTISING_INTERVAL, default="1s"): advertising_interval,
     cv.Optional(CONF_BOOT_TEST_PATTERN, default="none"): cv.enum(BOOT_PATTERNS, lower=True),
+    # Fixed hardware: B+ -- 1M -- P0.31/AIN7 -- 1M -- GND; 100nF to GND.
+    cv.Optional(CONF_BATTERY_VOLTAGE): cv.Schema({
+        cv.Optional(CONF_CALIBRATION, default=1.0): cv.float_range(min=0.8, max=1.2),
+    }),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -108,3 +114,8 @@ async def to_code(config):
     await cg.register_component(var, config)
     cg.add(var.set_advertising_interval(config[CONF_ADVERTISING_INTERVAL].total_milliseconds))
     cg.add(var.set_boot_pattern(config[CONF_BOOT_TEST_PATTERN]))
+    if CONF_BATTERY_VOLTAGE in config:
+        cg.add_define("USE_GTAG_BATTERY")
+        zephyr_add_overlay('&adc { status = "okay"; };')
+        zephyr_add_prj_conf("ADC", True)
+        cg.add(var.set_battery_calibration(config[CONF_BATTERY_VOLTAGE][CONF_CALIBRATION]))

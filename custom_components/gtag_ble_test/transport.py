@@ -14,9 +14,8 @@ import logging
 import time
 from typing import Any, TypeVar
 
-from bleak import BleakClient
 from bleak.exc import BleakCharacteristicNotFoundError, BleakError
-from bleak_retry_connector import establish_connection
+from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 from homeassistant.components import bluetooth
 from homeassistant.exceptions import HomeAssistantError
 
@@ -166,12 +165,13 @@ async def _disconnect(client: Any) -> None:
         # Cleanup failures must not replace the original transfer error/success.
         _LOGGER.debug("BLE disconnect cleanup failed: %r", err)
 
-async def connect(hass: Any, address: str) -> BleakClient:
+async def connect(hass: Any, address: str, *, use_services_cache: bool = True) -> BleakClientWithServiceCache:
     device = bluetooth.async_ble_device_from_address(hass, address, connectable=True)
     if device is None:
         raise TransferResyncError(f"No connectable advertisement for {address}")
-    return await establish_connection(BleakClient, device, address,
-                                      max_attempts=2, timeout=20.0)
+    return await establish_connection(BleakClientWithServiceCache, device, address,
+                                      max_attempts=2, timeout=20.0,
+                                      use_services_cache=use_services_cache)
 
 class FrameSender:
     """One press = one frame_id, retained across retries and reconnections."""

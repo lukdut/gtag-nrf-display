@@ -1,12 +1,42 @@
-"""Local transfer diagnostics; these entities never poll the BLE peripheral."""
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+"""Transfer diagnostics and battery voltage from the shared BLE monitor."""
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.const import UnitOfElectricPotential
 from homeassistant.helpers.entity import EntityCategory
 
 from .entity import GTagEntity
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    async_add_entities([LastUpdate(entry.runtime_data), TransferStatus(entry.runtime_data)])
+    async_add_entities([
+        LastUpdate(entry.runtime_data), TransferStatus(entry.runtime_data),
+        BatteryVoltage(entry.runtime_data),
+    ])
+
+
+class BatteryVoltage(GTagEntity, SensorEntity):
+    _attr_translation_key = "battery_voltage"
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+    _attr_suggested_display_precision = 2
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, display):
+        super().__init__(display, "battery_voltage")
+
+    @property
+    def available(self):
+        return self.display.battery.voltage is not None
+
+    @property
+    def native_value(self):
+        return self.display.battery.voltage
+
+    @property
+    def extra_state_attributes(self):
+        battery = self.display.battery
+        return {"last_read": battery.last_read, "last_error": battery.last_error,
+                "firmware_supported": battery.supported}
 
 
 class LastUpdate(GTagEntity, SensorEntity):
@@ -37,4 +67,12 @@ class TransferStatus(GTagEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        return {"last_error": self.display.last_error, **self.display.report}
+        # HA omits extra attributes of unavailable entities. Keep battery
+        # diagnostics on this always-available status entity as well.
+        battery = self.display.battery
+        return {
+            "last_error": self.display.last_error, **self.display.report,
+            "battery_last_read": battery.last_read,
+            "battery_last_error": battery.last_error,
+            "battery_firmware_supported": battery.supported,
+        }

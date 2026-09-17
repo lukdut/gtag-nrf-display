@@ -24,6 +24,9 @@ inline bool levels[2][32] = {};
 inline unsigned bit_count = 0, word = 0;
 inline uint64_t word_start = 0;
 inline std::function<void()> on_disable;
+inline unsigned adc_reads = 0;
+inline int adc_error = 0;
+inline int16_t adc_raw = 3584;  // 2.1V ADC input -> 4.2V battery.
 
 inline void pin(unsigned port, unsigned bit, bool value) {
   const bool old = levels[port][bit];
@@ -82,20 +85,54 @@ inline void k_busy_wait(unsigned us) { sim::now_us += us; }
 inline uint32_t k_uptime_get_32() { return sim::now_us / 1000; }
 
 struct device { unsigned port; };
-inline device gpio0{0}, gpio1{1};
+inline device gpio0{0}, gpio1{1}, adc{2};
 using gpio_pin_t = unsigned;
 using gpio_flags_t = unsigned;
 #define DT_NODELABEL(x) x
 #define DEVICE_DT_GET(x) (&x)
 #define GPIO_INPUT 1
+#define GPIO_DISCONNECTED 0
 #define GPIO_OUTPUT_HIGH 2
 #define GPIO_OUTPUT_LOW 4
 #define NRF_GPIO_DRIVE_S0H1 8
 #define BIT(x) (1U << (x))
 inline bool device_is_ready(const device *) { return true; }
 inline int gpio_pin_configure(const device *dev, unsigned bit, unsigned flags) {
+  if (dev == &gpio0 && bit == 31) assert(flags == GPIO_DISCONNECTED);
   sim::pin(dev->port, bit, flags & GPIO_OUTPUT_HIGH);
   return 0;
+}
+
+#define ADC_GAIN_1_4 4
+#define ADC_REF_INTERNAL 0
+#define ADC_ACQ_TIME_MICROSECONDS 1
+#define ADC_ACQ_TIME(unit, value) value
+#define NRF_SAADC_AIN7 8
+struct adc_channel_cfg {
+  int gain, reference, acquisition_time;
+  unsigned channel_id, input_positive;
+};
+struct adc_sequence {
+  unsigned channels;
+  void *buffer;
+  size_t buffer_size;
+  unsigned resolution, oversampling;
+  bool calibrate;
+};
+inline int adc_channel_setup(const device *dev, const adc_channel_cfg *channel) {
+  assert(dev == &adc && channel->channel_id == 0);
+  assert(channel->input_positive == NRF_SAADC_AIN7);
+  assert(channel->acquisition_time == 40 && channel->gain == ADC_GAIN_1_4);
+  assert(channel->reference == ADC_REF_INTERNAL);
+  return 0;
+}
+inline int adc_read(const device *dev, const adc_sequence *sequence) {
+  assert(dev == &adc && sequence->channels == 1);
+  assert(sequence->buffer_size == sizeof(int16_t));
+  assert(sequence->resolution == 12 && sequence->oversampling == 4 && sequence->calibrate);
+  ++sim::adc_reads;
+  *static_cast<int16_t *>(sequence->buffer) = sim::adc_raw;
+  return sim::adc_error;
 }
 struct Register {
   unsigned port;

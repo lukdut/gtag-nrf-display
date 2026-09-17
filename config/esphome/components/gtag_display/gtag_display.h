@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "esphome/core/component.h"
+#include "esphome/core/defines.h"
 #include "frame_protocol.h"
 
 namespace esphome {
@@ -30,6 +31,11 @@ class GTagDisplay : public Component {
   bool write_frame_chunk(uint16_t offset, const uint8_t *data, size_t len);
   bool commit_frame();
   void get_status(uint8_t out[8]) const { receiver_.status(out); }
+  // Millivolts, or 0xFFFF when disabled, not yet sampled, or ADC failed.
+  uint16_t battery_mv() const { return battery_mv_.load(); }
+#ifdef USE_GTAG_BATTERY
+  void set_battery_calibration(float value) { battery_calibration_ = value; }
+#endif
 
  protected:
   enum class Stage : uint8_t {
@@ -58,6 +64,14 @@ class GTagDisplay : public Component {
   bool send_frame_(const uint8_t *frame);
   void wait_(Stage next, uint32_t delay_ms);
   void service_lcd_();
+
+#ifdef USE_GTAG_BATTERY
+  void setup_battery_();
+  void sample_battery_();
+  float battery_calibration_{1.0f};
+  bool battery_adc_ready_{false};
+#endif
+  std::atomic<uint16_t> battery_mv_{0xFFFF};
 
   frame::Receiver receiver_;
   // Decode separately so a rejected frame cannot corrupt a queued good frame.

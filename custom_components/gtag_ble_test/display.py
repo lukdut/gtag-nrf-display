@@ -21,6 +21,7 @@ from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
+from .battery import BatteryMonitor
 from .frame_protocol import PreparedFrame
 from .layouts import async_render_layout, preset_layout, validate_settings
 from .render import LAYOUT_SCHEMA, RenderedFrame, clock_layout, from_raw
@@ -72,6 +73,7 @@ class Display:
         self._entry_options = entry.options
         self._options_revision = None
         self._configured_interval = entry.options.get("screen", {}).get("update_interval")
+        self.battery = BatteryMonitor(hass, self.address, self._notify)
 
     @property
     def update_interval(self) -> float:
@@ -149,6 +151,7 @@ class Display:
 
     @callback
     def async_start(self) -> None:
+        self.battery.async_start()
         if self.clock_enabled:
             self._start_clock()
             self._enqueue("clock", None, True)
@@ -361,6 +364,7 @@ class Display:
 
     async def async_close(self) -> None:
         self._closed = True
+        await self.battery.async_close()
         self._stop_watching()
         self._stop_clock()
         if self._pending is not None:

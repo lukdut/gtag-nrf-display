@@ -44,6 +44,9 @@ void firmware_create(unsigned pattern, unsigned interval) {
   sim::words.clear();
   std::memset(sim::levels, 0, sizeof(sim::levels));
   sim::on_disable = {};
+  sim::adc_reads = 0;
+  sim::adc_raw = 3584;
+  sim::adc_error = 0;
   display = std::make_unique<TestDisplay>();
   display->set_boot_pattern(static_cast<BootPattern>(pattern));
   display->set_advertising_interval(interval);
@@ -73,6 +76,14 @@ int firmware_led(const uint8_t *data, uint16_t len) {
   return write_led(nullptr, nullptr, data, len, 0, 0);
 }
 void firmware_status(uint8_t *out) { display->get_status(out); }
+int firmware_battery(uint8_t *out, uint16_t len, uint16_t offset) {
+  return read_battery(nullptr, nullptr, out, len, offset);
+}
+void firmware_adc_value(int raw, int error) { sim::adc_raw = raw; sim::adc_error = error; }
+unsigned firmware_adc_reads() { return sim::adc_reads; }
+#ifdef USE_GTAG_BATTERY
+void firmware_calibration(float value) { display->set_battery_calibration(value); }
+#endif
 unsigned firmware_frames() { return display->frames(); }
 unsigned firmware_loops() { return sim::loop_calls; }
 unsigned firmware_advertising() { return sim::advertising; }
