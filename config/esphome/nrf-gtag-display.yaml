@@ -1,36 +1,13 @@
-esphome:
-  name: nrf-gtag-display
-  friendly_name: NRF GTag Display
-  min_version: 2026.8.2
-  on_boot:
-    priority: -100
-    then:
-      # BLE events and LCD timers wake the loop before this idle interval ends.
-      - lambda: App.set_loop_interval(1000);
-
-nrf52:
-  board: adafruit_itsybitsy_nrf52840
-  bootloader: adafruit_nrf52_sd140_v6
-  dcdc: false
-  framework:
-    version: 2.9.2
-
-# Enable USB logs only when diagnosing the board:
-# logger:
-#   level: INFO
+# Local development entry point; the same settings are used by the GitHub package.
+packages:
+  gtag: !include packages/ble-base.yaml
 
 external_components:
   - source:
       type: local
       path: components
-    components:
-      - gtag_display
+    components: [gtag_display]
 
-gtag_display:
-  tx_power: 0
-  advertising_interval: 1s
-  boot_test_pattern: none
-  # LiPo 1S: B+ -- 1M -- P0.31 -- 1M -- B-/GND; 100nF from P0.31 to GND.
-  # Remove this block to build without battery measurements.
-  battery_voltage:
-    calibration: 1.0
+# Enable USB logs only for diagnostics (increases standby consumption):
+# logger:
+#   level: INFO

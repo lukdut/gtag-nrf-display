@@ -1,0 +1,12 @@
+# Public BLE package. Pin both this package and its C++ component to one release.
+packages:
+  gtag_base: !include ble-base.yaml
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/lukdut/gtag-nrf-display.git
+      ref: v0.8.0
+      path: config/esphome/components
+    refresh: never
+    components: [gtag_display]

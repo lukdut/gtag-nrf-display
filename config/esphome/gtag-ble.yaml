@@ -1,0 +1,12 @@
+# Copy this file into ESPHome Device Builder; no local component folders needed.
+substitutions:
+  gtag_name: nrf-gtag-display
+  gtag_friendly_name: NRF GTag Display
+  gtag_battery_calibration: "1.0"
+
+packages:
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.8.0
+
+# If the external battery divider is not fitted, uncomment:
+# gtag_display:
+#   battery_voltage: !remove

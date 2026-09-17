@@ -1,7 +1,7 @@
 {
   "domain": "gtag_ble_test",
   "name": "GTag Display",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "config_flow": true,
   "dependencies": [
     "bluetooth"
@@ -11,5 +11,10 @@
     {
       "service_uuid": "7a1e0011-6b5b-4f6d-8d6e-0f4f47544147"
     }
+  ],
+  "documentation": "https://github.com/lukdut/gtag-nrf-display#readme",
+  "issue_tracker": "https://github.com/lukdut/gtag-nrf-display/issues",
+  "codeowners": [
+    "@lukdut"
   ]
 }

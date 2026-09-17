@@ -4,14 +4,16 @@
 nRF52840 Pro Micro / nice!nano. Home Assistant передаёт кадр через BLE,
 прошивка проверяет CRC32 и выводит изображение после отключения клиента.
 
-В проекте одна целевая прошивка:
-[nrf-gtag-display.yaml](config/esphome/nrf-gtag-display.yaml) с компонентом
+В проекте одна целевая BLE-прошивка:
+[gtag-ble.yaml](config/esphome/gtag-ble.yaml) для ESPHome Device Builder и
+[nrf-gtag-display.yaml](config/esphome/nrf-gtag-display.yaml) для локальной разработки,
+с общими настройками и компонентом
 [gtag_display](config/esphome/components/gtag_display).
 Интеграция HA находится в [custom_components/gtag_ble_test](custom_components/gtag_ble_test).
 Её техническое имя сохранено для совместимости с уже добавленными устройствами
 и идентификаторами сущностей; в интерфейсе она называется **GTag Display**.
 
-Версия **0.7.1** позволяет выбрать готовый макет и сущности через настройки HA,
+Версия **0.8.0** позволяет выбрать готовый макет и сущности через настройки HA,
 посмотреть результат и применить его. Произвольные экраны доступны через действие
 `gtag_ble_test.draw` с шаблонами, текстом, фигурами и иконками.
 Добавлено [измерение напряжения LiPo](docs/battery.md) через делитель на P0.31
@@ -19,10 +21,16 @@ nRF52840 Pro Micro / nice!nano. Home Assistant передаёт кадр чер�
 
 ![Пример макета «Время и два показателя»](docs/screen-clock-two.png)
 
-Для распространения выбран **HACS**. Локальная структура подготовлена:
-`custom_components/` в корне, `hacs.json`, переводы, иконка и автоматические тесты.
-Публичный GitHub-репозиторий пока не создан, поэтому сейчас устанавливайте ZIP
-или копируйте каталог вручную. [Установка и подготовка публикации](docs/installation.md).
+Репозиторий: [lukdut/gtag-nrf-display](https://github.com/lukdut/gtag-nrf-display).
+Интеграция устанавливается через **пользовательский репозиторий HACS**.
+Прошивка собирается в **ESPHome Device Builder**; компоненты загружаются из
+GitHub автоматически. Готовый UF2 и архив ручной установки доступны в
+[релизах](https://github.com/lukdut/gtag-nrf-display/releases).
+[Пошаговая установка](docs/installation.md).
+
+Поддерживается **Bluetooth**. Zigbee через Zigbee2MQTT запланирован и пока не
+реализован. Общий редактор экранов и сборка через ESPHome сохранятся для обоих
+вариантов. [План развития и поддерживаемые установки HA](docs/roadmap.md).
 
 ## Подключение
 
@@ -72,7 +80,7 @@ gtag_display:
   tx_power: 0                 # 0, 4 или 8 dBm
   advertising_interval: 1s   # 100ms..10240ms; 500ms для более частой рекламы
   boot_test_pattern: none    # none, white, black, checkerboard, stripes
-  battery_voltage:          # удалить блок, если делитель не установлен
+  battery_voltage:          # в конфигурации с пакетами: battery_voltage: !remove
     calibration: 1.0        # поправка по мультиметру, 0.8..1.2
 ```
 
@@ -83,6 +91,31 @@ gtag_display:
 
 ## Сборка и Home Assistant
 
+В ESPHome Device Builder создайте конфигурацию и вставьте:
+
+```yaml
+substitutions:
+  gtag_name: gtag-kitchen
+  gtag_friendly_name: "Экран кухни"
+  gtag_battery_calibration: "1.0"
+
+packages:
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.8.0
+```
+
+Если делитель аккумулятора не установлен, добавьте:
+
+```yaml
+gtag_display:
+  battery_voltage: !remove
+```
+
+Соберите прошивку, скачайте UF2 и скопируйте его на USB-диск загрузчика платы.
+Менять YAML для настройки содержимого экрана не нужно: это делается в HA.
+Для установки интеграции добавьте этот репозиторий в HACS с типом **Integration**.
+[Инструкция для HA OS и HA Container](docs/installation.md).
+
+Для разработки с локальными исходниками используйте конфигурацию ниже.
 Конфигурация рассчитана на **ESPHome 2026.8.2**, **nRF Connect SDK 2.9.2**.
 Установка и сборка из корня проекта (Python 3.12+, первая сборка скачивает SDK):
 
@@ -121,7 +154,7 @@ UF2 появляется в
 физическим светодиодом он не управляет. Он использует ту же блокировку операций,
 что и отправка кадра.
 
-Интеграция **0.7.1** также предоставляет:
+Интеграция **0.8.0** также предоставляет:
 
 - Диалог настройки на русском и английском: «Часы и дата», «Один крупный
   показатель», «Время и два показателя». Выбор сущностей, подписи и единицы,
