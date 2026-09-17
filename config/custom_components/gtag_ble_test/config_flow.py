@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-import probatio
+import voluptuous as vol
 
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
@@ -45,7 +45,7 @@ class GTagBLETestConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="confirm",
-            data_schema=probatio.Schema({}),
+            data_schema=vol.Schema({}),
         )
 
     async def async_step_user(
@@ -79,13 +79,13 @@ class GTagBLETestConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="no_devices_found")
 
         choices = {
-            address: f"{info.name or 'GTag BLE Test'} ({address})"
+            address: f"{info.name or 'GTag Display'} ({address})"
             for address, info in self._devices.items()
         }
 
         return self.async_show_form(
             step_id="user",
-            data_schema=probatio.Schema(
-                {probatio.Required(CONF_ADDRESS): probatio.In(choices)}
+            data_schema=vol.Schema(
+                {vol.Required(CONF_ADDRESS): vol.In(choices)}
             ),
         )

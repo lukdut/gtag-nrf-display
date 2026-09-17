@@ -1,10 +1,10 @@
 {
-  "title": "GTag BLE Test",
+  "title": "GTag Display",
   "config": {
     "step": {
       "confirm": {
         "title": "Add {name}?",
-        "description": "Add the nRF52840 GATT test device."
+        "description": "Add the G-Tag display connected through nRF52840."
       },
       "user": {
         "title": "Select device",

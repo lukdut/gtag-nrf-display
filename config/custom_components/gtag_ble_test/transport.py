@@ -1,13 +1,9 @@
-"""v0.4: bounded Write Without Response windows for the EXISTING v0.3 nRF.
+"""Protocol-v1 BLE transport for gtag_display: RAW/WHITE_RLE and CRC32.
 
-HA-only update: no GATT UUID, table, MTU or firmware changes.
-BEGIN/COMMIT remain acknowledged. A fresh STATUS confirms each data window;
-only receiver-confirmed progress counts. Short windows are retried from that
-prefix; persistent short windows fall back to acknowledged writes. The v0.3
-C++ receiver validates bounds, identical duplicates and CRC32 on COMMIT.
-
-No asyncio.gather(): writes are queued in order and the queue depth is bounded.
-This is a transfer prototype, not an authenticated production protocol.
+BEGIN/COMMIT use acknowledged writes; bounded data windows use Write Without
+Response with STATUS-confirmed progress, retries, resume and ACK fallback.
+Disconnect after verification lets the peripheral render and return to idle.
+Frame transfer and the virtual LED share one operation lock per device.
 """
 from __future__ import annotations
 

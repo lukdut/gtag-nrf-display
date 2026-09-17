@@ -273,9 +273,10 @@ struct bt_conn_cb conn_callbacks = {};
 
 void GTagDisplay::connection_changed(bool connected) {
   this->connected_.store(connected);
-
-  if (!connected)
-    this->restart_advertising_.store(true);
+  this->restart_advertising_.store(!connected);
+  // GATT runs on a Zephyr thread. Wake the ESPHome loop without calling its
+  // scheduler or touching LCD GPIO from that thread.
+  this->enable_loop_soon_any_context();
 }
 
 void GTagDisplay::set_virtual_led(bool state) {
@@ -330,9 +331,10 @@ bool GTagDisplay::write_frame_chunk(
 }
 
 bool GTagDisplay::commit_frame() {
+  const bool first_commit = this->receiver_.state() != frame::State::COMPLETE;
   if (!this->receiver_.commit(
-          this->display_frame_.data(),
-          this->display_frame_.size())) {
+          this->decoded_frame_.data(),
+          this->decoded_frame_.size())) {
 
     ESP_LOGW(
         TAG,
@@ -347,34 +349,66 @@ bool GTagDisplay::commit_frame() {
     return false;
   }
 
-  this->frame_pending_.store(true);
+  if (first_commit) {
+    std::memcpy(this->display_frame_.data(), this->decoded_frame_.data(), FRAME_BYTES);
+    this->frame_pending_.store(true);
+    this->enable_loop_soon_any_context();
+  }
 
   ESP_LOGI(
       TAG,
-      "Frame decoded+verified: encoded=%u raw=4096 codec=%u CRC32=%08X; queued for LCD",
+      "Frame verified: encoded=%u raw=4096 codec=%u CRC32=%08X; new=%u",
       unsigned(this->receiver_.encoded_size()),
       unsigned(static_cast<uint8_t>(this->receiver_.codec())),
-      unsigned(this->receiver_.actual_raw_crc32()));
+      unsigned(this->receiver_.actual_raw_crc32()), unsigned(first_commit));
 
   return true;
 }
 
 
 bool GTagDisplay::start_advertising_() {
+  // BLE uses 0.625 ms units. Round up to avoid advertising more frequently
+  // than configured. ONE_TIME leaves restart after disconnect to loop(), so
+  // no connection can race the LCD burst or replace its framebuffer.
+  const uint32_t interval = (this->advertising_interval_ms_ * 8U + 4U) / 5U;
+  const struct bt_le_adv_param params = BT_LE_ADV_PARAM_INIT(
+      BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_ONE_TIME,
+      interval, interval, nullptr);
   const int err = bt_le_adv_start(
-      BT_LE_ADV_CONN,
+      &params,
       ad,
       ARRAY_SIZE(ad),
       sd,
       ARRAY_SIZE(sd));
 
   if (err == 0 || err == -EALREADY) {
-    ESP_LOGI(TAG, "BLE advertising ready");
+    ESP_LOGI(TAG, "BLE advertising ready; interval=%u ms", unsigned(this->advertising_interval_ms_));
     return true;
   }
 
   ESP_LOGW(TAG, "Advertising failed: %d; retry in 1s", err);
   return false;
+}
+
+void GTagDisplay::queue_boot_pattern_() {
+  if (this->boot_pattern_ == BootPattern::NONE)
+    return;
+
+  for (size_t i = 0; i < FRAME_BYTES; ++i) {
+    uint8_t value = 0xFF;
+    switch (this->boot_pattern_) {
+      case BootPattern::BLACK: value = 0x00; break;
+      case BootPattern::CHECKERBOARD:
+        value = ((((i / 32) / 8) + (i % 32)) & 1U) ? 0x00 : 0xFF;
+        break;
+      case BootPattern::STRIPES: value = 0x0F; break;
+      case BootPattern::NONE:
+      case BootPattern::WHITE: break;
+    }
+    this->display_frame_[i] = value;
+  }
+  // This local diagnostic is not reported as a received BLE frame.
+  this->frame_pending_.store(true);
 }
 
 
@@ -385,6 +419,9 @@ bool GTagDisplay::start_advertising_() {
 void GTagDisplay::wait_(Stage next, uint32_t delay_ms) {
   this->stage_ = next;
   this->next_ms_ = k_uptime_get_32() + delay_ms;
+  // Also request a component phase immediately: enable_loop() alone can wait
+  // for the application's longer idle loop interval after the timer fires.
+  this->set_timeout("lcd_step", delay_ms, [this]() { this->enable_loop_soon_any_context(); });
 }
 
 bool GTagDisplay::configure_pins_() {
@@ -643,9 +680,8 @@ void GTagDisplay::service_lcd_() {
     }
   }
 
-  // The HA v0.4 sender verifies STATUS and then disconnects. Rendering only
-  // after disconnect keeps the proven v36 LCD timing away from active GATT
-  // traffic and avoids a new client racing the framebuffer copy.
+  // HA verifies STATUS and disconnects. ONE_TIME advertising prevents the
+  // stack from accepting another connection until this burst has finished.
   if (this->stage_ == Stage::READY &&
       !this->connected_.load() &&
       this->frame_pending_.exchange(false)) {
@@ -659,7 +695,7 @@ void GTagDisplay::service_lcd_() {
       ESP_LOGI(TAG, "BLE frame rendered on LCD");
     }
 
-    // Advertise again only after the ~235 ms LCD burst is complete.
+    // Advertise again only after the LCD burst is complete.
     this->restart_advertising_.store(true);
   }
 }
@@ -674,12 +710,14 @@ void GTagDisplay::setup() {
 
   ESP_LOGI(
       TAG,
-      "GTag BLE+LCD v2: transport-neutral frame protocol v1 + proven LCD3-DIRECT-01");
+      "GTag Display: protocol v1, System ON idle, event-driven LCD");
 
   if (!this->configure_pins_()) {
     this->mark_failed();
     return;
   }
+
+  this->queue_boot_pattern_();
 
   const int err = bt_enable(nullptr);
 
@@ -705,30 +743,40 @@ void GTagDisplay::loop() {
   if (this->is_failed())
     return;
 
+  // No polling while idle. BLE callbacks queue an enable via the thread-safe
+  // API; timed startup/retry stages enable us through the ESPHome scheduler.
+  // Disable BEFORE checking work, so a concurrent callback cannot lose a wake.
+  // Zephyr may enter System ON sleep whenever all threads are waiting.
+  this->disable_loop();
+
   // If a committed frame is waiting after disconnect, render it before
   // restarting advertising. This keeps LCD SPI isolated from GATT traffic.
   this->service_lcd_();
 
-  const uint32_t now = millis();
-
   if (this->restart_advertising_.load() &&
       !this->connected_.load() &&
       !this->frame_pending_.load() &&
-      int32_t(now - this->next_advertising_attempt_) >= 0) {
+      this->stage_ == Stage::READY) {
 
     this->restart_advertising_.store(false);
 
-    if (!this->start_advertising_())
+    if (!this->start_advertising_()) {
       this->restart_advertising_.store(true);
-
-    this->next_advertising_attempt_ = now + 1000;
+      this->set_timeout("advertising_retry", 1000, [this]() { this->enable_loop_soon_any_context(); });
+    } else {
+      this->cancel_timeout("advertising_retry");
+    }
   }
 }
 
 void GTagDisplay::dump_config() {
   ESP_LOGCONFIG(
       TAG,
-      "GTag BLE+LCD v2; protocol-v1 codecs RAW/WHITE_RLE_V1; UUIDs 0011..0015");
+      "GTag Display; protocol-v1 codecs RAW/WHITE_RLE_V1; UUIDs 0011..0015");
+
+  ESP_LOGCONFIG(TAG, "  Power saving: System ON idle; BLE remains connectable");
+  ESP_LOGCONFIG(TAG, "  Advertising interval: %u ms; boot pattern: %u",
+                unsigned(this->advertising_interval_ms_), unsigned(this->boot_pattern_));
 
   ESP_LOGCONFIG(
       TAG,
