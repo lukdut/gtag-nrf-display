@@ -1,4 +1,5 @@
 #include "gtag_display.h"
+#include "boot_logo.h"
 
 #include <cerrno>
 #include <cstring>
@@ -34,6 +35,7 @@ static const char *const TAG = "gtag_display";
 
 constexpr uint32_t HALF_US = 2;
 constexpr size_t FRAME_BYTES = 4096;
+static_assert(boot_logo::FRAME.size() == FRAME_BYTES, "Boot logo must fill the LCD framebuffer");
 
 const char *const PIN_NAMES[] = {"DIO", "CLK", "CS", "RESET"};
 #ifdef USE_GTAG_BATTERY
@@ -529,6 +531,7 @@ void GTagDisplay::queue_pattern_(BootPattern pattern) {
   for (size_t i = 0; i < FRAME_BYTES; ++i) {
     uint8_t value = 0xFF;
     switch (pattern) {
+      case BootPattern::LOGO: value = boot_logo::FRAME[i]; break;
       case BootPattern::BLACK: value = 0x00; break;
       case BootPattern::CHECKERBOARD:
         value = ((((i / 32) / 8) + (i % 32)) & 1U) ? 0x00 : 0xFF;
@@ -539,7 +542,7 @@ void GTagDisplay::queue_pattern_(BootPattern pattern) {
     }
     this->display_frame_[i] = value;
   }
-  // This local diagnostic is not reported as a received BLE frame.
+  // The local logo/diagnostic is not reported as a received remote frame.
   this->frame_pending_.store(true);
 }
 

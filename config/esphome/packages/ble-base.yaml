@@ -10,7 +10,7 @@ gtag_display:
   transport: ble
   tx_power: ${gtag_tx_power}
   advertising_interval: ${gtag_advertising_interval}
-  boot_test_pattern: none
+  boot_test_pattern: logo
   # B+ -- 1M -- P0.31 -- 1M -- GND; 100nF from P0.31 to GND.
   battery_voltage:
     calibration: ${gtag_battery_calibration}

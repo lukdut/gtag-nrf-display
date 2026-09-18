@@ -37,6 +37,7 @@ GTagZigbee = ns.class_("GTagZigbee", cg.Component)
 ZigbeeComponent = cg.esphome_ns.namespace("zigbee").class_("ZigbeeComponent", cg.Component)
 BootPattern = ns.enum("BootPattern", is_class=True)
 BOOT_PATTERNS = {
+    "logo": BootPattern.LOGO,
     "none": BootPattern.NONE,
     "white": BootPattern.WHITE,
     "black": BootPattern.BLACK,
@@ -104,7 +105,7 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.Optional("zigbee_power_diagnostics", default=False): cv.boolean,
     cv.Optional(CONF_TX_POWER, default=0): cv.one_of(0, 4, 8, int=True),
     cv.Optional(CONF_ADVERTISING_INTERVAL, default="1s"): advertising_interval,
-    cv.Optional(CONF_BOOT_TEST_PATTERN, default="none"): cv.enum(BOOT_PATTERNS, lower=True),
+    cv.Optional(CONF_BOOT_TEST_PATTERN, default="logo"): cv.enum(BOOT_PATTERNS, lower=True),
     **{cv.Optional(key, default=value): cv.All(gpio_number, pins.internal_gpio_output_pin_number)
        for key, value in LCD_PINS.items()},
     # B+ -- 1M -- ADC GPIO -- 1M -- GND; 100nF from ADC GPIO to GND.

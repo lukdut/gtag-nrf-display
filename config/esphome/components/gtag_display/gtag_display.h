@@ -14,7 +14,8 @@
 namespace esphome {
 namespace gtag_display {
 
-enum class BootPattern : uint8_t { NONE, WHITE, BLACK, CHECKERBOARD, STRIPES };
+// Keep diagnostic values stable: the Zigbee control maps 0..3 to WHITE..STRIPES.
+enum class BootPattern : uint8_t { NONE, WHITE, BLACK, CHECKERBOARD, STRIPES, LOGO };
 
 class GTagDisplay : public Component {
  public:
@@ -115,7 +116,7 @@ class GTagDisplay : public Component {
   Stage stage_{Stage::BOOT_WAIT};
   uint32_t next_ms_{0};
   uint32_t advertising_interval_ms_{1000};
-  BootPattern boot_pattern_{BootPattern::NONE};
+  BootPattern boot_pattern_{BootPattern::LOGO};
   uint32_t words_{0};
   uint32_t frames_{0};
   uint32_t resets_{0};

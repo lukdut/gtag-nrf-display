@@ -6,6 +6,7 @@ LCD state machine and GPIO serializer are the production implementations.
 """
 import asyncio
 import ctypes
+import hashlib
 import importlib
 import logging
 from pathlib import Path
@@ -22,6 +23,8 @@ from saleae_reference import reference_words
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "config/esphome/components/gtag_display"
+# Golden LCD bytes of the approved docs/design/boot-logo.png, packed LSB-first.
+BOOT_LOGO_SHA256 = "c1c5a7aa6c9a6a62118b9cb7f7a1551f19466a77c9aa8d56c7e56c05edcdbba8"
 
 
 def module(name, **attributes):
@@ -152,9 +155,47 @@ def commit():
     return fw.firmware_control(b"\x02", 1)
 
 
+class BootLogoTests(unittest.TestCase):
+    def test_approved_logo_is_sent_once_then_waits_without_polling(self):
+        for name, variant in (("ble", fw), ("ble_no_battery", fw_without_battery),
+                              ("zigbee", fw_zigbee)):
+            with self.subTest(profile=name):
+                variant.firmware_create(5, 1000)  # BootPattern::LOGO.
+                variant.firmware_run(4000)
+                self.assertEqual(variant.firmware_frames(), 1)
+                count = variant.firmware_words()
+                raw = bytes(variant.firmware_word(i) & 255 for i in range(count - 4096, count))
+                self.assertEqual(hashlib.sha256(raw).hexdigest(), BOOT_LOGO_SHA256)
+                # A local logo must not masquerade as a received/verified frame.
+                reply = ctypes.create_string_buffer(8)
+                variant.firmware_status(reply)
+                self.assertEqual(reply.raw[0], 0)  # IDLE.
+                loops = variant.firmware_loops()
+                variant.firmware_run(3_600_000)
+                self.assertEqual(variant.firmware_loops(), loops)
+                self.assertEqual(variant.firmware_words(), count)
+                self.assertEqual(variant.firmware_frames(), 1)
+
+
 class DisplayTests(unittest.TestCase):
     def setUp(self):
         start()
+
+    def test_first_ble_frame_replaces_boot_logo(self):
+        fw.firmware_create(5, 1000)
+        fw.firmware_run(4000)
+        self.assertTrue(fw.firmware_advertising())
+        raw = bytes(range(256)) * 16
+        fw.firmware_connect()
+        begin(raw)
+        self.assertEqual(commit(), 1)
+        fw.firmware_run(0)
+        self.assertEqual(fw.firmware_frames(), 1)
+        fw.firmware_disconnect()
+        fw.firmware_run(0)
+        self.assertEqual(fw.firmware_frames(), 2)
+        self.assertEqual(bytes(value & 255 for value in words()[-4096:]), raw)
+        self.assertTrue(fw.firmware_advertising())
 
     def test_freshness_icon_inverts_only_glyph_and_restores_exact_frame(self):
         for fill in (0x00, 0xff, 0x55):
@@ -441,7 +482,7 @@ class ZigbeeDisplayTests(unittest.TestCase):
     """Exercise the shared driver without BLE; radio/ZCL need hardware testing."""
 
     def setUp(self):
-        fw_zigbee.firmware_create(3, 1000)  # Boot checkerboard.
+        fw_zigbee.firmware_create(5, 1000)  # Boot logo, as in the shipped profile.
 
     def packet(self, data):
         reply = ctypes.create_string_buffer(20)
@@ -472,7 +513,8 @@ class ZigbeeDisplayTests(unittest.TestCase):
 
     def test_full_frame_crc_and_lcd_confirmation_are_separate(self):
         fw_zigbee.firmware_run(4000)
-        reply = self.send_frame(bytes(range(256)) * 16)
+        raw = bytes(range(256)) * 16
+        reply = self.send_frame(raw)
         self.assertEqual(reply[7], 2)
         self.assertTrue(reply[15] & 1)  # Pending LCD write.
         self.assertEqual(fw_zigbee.firmware_frames(), 1)
@@ -481,6 +523,9 @@ class ZigbeeDisplayTests(unittest.TestCase):
         self.assertEqual(reply[15], 2)
         self.assertEqual(int.from_bytes(reply[16:20], 'little'), 123)
         self.assertEqual(fw_zigbee.firmware_frames(), 2)
+        count = fw_zigbee.firmware_words()
+        shown = bytes(fw_zigbee.firmware_word(i) & 255 for i in range(count - 4096, count))
+        self.assertEqual(shown, raw)
         self.packet(struct.pack('<BI', 3, 123))
         fw_zigbee.firmware_run(0)
         self.assertEqual(fw_zigbee.firmware_frames(), 2)

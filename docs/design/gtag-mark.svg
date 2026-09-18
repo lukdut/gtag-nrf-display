@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 55 41">
+  <title>GTag — electronic display tag</title>
+  <polygon points="2,0 38,0 54,16 54,24 38,40 2,40 0,38 0,2" fill="black"/>
+  <rect x="13" y="10" width="3" height="3" fill="white"/>
+  <rect x="16" y="10" width="3" height="3" fill="white"/>
+  <rect x="19" y="10" width="3" height="3" fill="white"/>
+  <rect x="10" y="13" width="3" height="3" fill="white"/>
+  <rect x="22" y="13" width="3" height="3" fill="white"/>
+  <rect x="10" y="16" width="3" height="3" fill="white"/>
+  <rect x="10" y="19" width="3" height="3" fill="white"/>
+  <rect x="16" y="19" width="3" height="3" fill="white"/>
+  <rect x="19" y="19" width="3" height="3" fill="white"/>
+  <rect x="22" y="19" width="3" height="3" fill="white"/>
+  <rect x="10" y="22" width="3" height="3" fill="white"/>
+  <rect x="22" y="22" width="3" height="3" fill="white"/>
+  <rect x="10" y="25" width="3" height="3" fill="white"/>
+  <rect x="22" y="25" width="3" height="3" fill="white"/>
+  <rect x="13" y="28" width="3" height="3" fill="white"/>
+  <rect x="16" y="28" width="3" height="3" fill="white"/>
+  <rect x="19" y="28" width="3" height="3" fill="white"/>
+  <rect x="42" y="18" width="5" height="5" fill="white"/>
+</svg>

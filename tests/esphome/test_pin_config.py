@@ -39,6 +39,7 @@ gtag_display:
             with self.subTest(profile=profile, pins="default"):
                 result, code = self.run_config(profile=profile, generate=True)
                 self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn("->set_boot_pattern(gtag_display::BootPattern::LOGO);", code)
                 for setter, number in (("dio_pin", 11), ("clk_pin", 36), ("cs_pin", 38),
                                        ("reset_pin", 45), ("battery_pin", 31)):
                     self.assertIn(f"->set_{setter}({number});", code)
@@ -108,6 +109,7 @@ esphome:
             defines = (folder / "build/src/esphome/core/defines.h").read_text()
             self.assertNotIn("USE_GTAG_BATTERY", defines)
             self.assertNotIn("gtag_battery_sensor", code)
+            self.assertIn("->set_boot_pattern(gtag_display::BootPattern::LOGO);", code)
             for setter, number in (("dio_pin", 47), ("clk_pin", 45), ("cs_pin", 46), ("reset_pin", 44)):
                 self.assertIn(f"->set_{setter}({number});", code)
             self.assertIn("zigbee_zigbeesensor_id->set_endpoint(1)", code)

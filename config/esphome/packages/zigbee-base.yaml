@@ -25,7 +25,7 @@ gtag_display:
   id: gtag_lcd
   transport: zigbee
   zigbee_id: gtag_zigbee
-  boot_test_pattern: checkerboard
+  boot_test_pattern: logo
   battery_voltage:
     calibration: ${gtag_battery_calibration}
 
