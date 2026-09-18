@@ -20,7 +20,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_TRANSPORT, DOMAIN, SERVICE_UUID, TRANSPORT_BLE, TRANSPORT_ZIGBEE
 from .layouts import (
-    DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, StaleAfterTooShort,
+    DECIMAL_PLACES, DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, StaleAfterTooShort,
     async_render_layout, normalize_saved_timing, preset_layout,
     validate_settings, validate_timing, value_count,
 )
@@ -235,6 +235,10 @@ class GTagOptionsFlow(OptionsFlow):
             )
             fields[vol.Optional(f"label_{index}")] = selector.TextSelector()
             fields[vol.Optional(f"unit_{index}")] = selector.TextSelector()
+            fields[vol.Optional(f"decimals_{index}", default="original")] = selector.SelectSelector(
+                selector.SelectSelectorConfig(options=list(DECIMAL_PLACES), translation_key="decimal_places",
+                                              mode=selector.SelectSelectorMode.DROPDOWN),
+            )
         schema = vol.Schema(fields)
         errors = {}
         if user_input is not None:
@@ -242,6 +246,7 @@ class GTagOptionsFlow(OptionsFlow):
             for index in range(1, count + 1):
                 for field in ("entity", "label", "unit"):
                     candidate[f"{field}_{index}"] = user_input.get(f"{field}_{index}", "")
+                candidate[f"decimals_{index}"] = user_input.get(f"decimals_{index}", "original")
                 entity_id = candidate[f"entity_{index}"]
                 if entity_id in excluded:
                     errors[f"entity_{index}"] = "invalid_entity"

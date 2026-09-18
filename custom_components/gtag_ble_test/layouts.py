@@ -16,6 +16,7 @@ from .render import RenderedFrame, render_layout
 PRESETS = ("clock", "single_value", "clock_two_values")
 DEFAULT_PRESET = "clock_two_values"
 DEFAULT_INTERVAL = 5
+DECIMAL_PLACES = ("original", "0", "1", "2", "3", "4", "5", "6")
 
 SETTINGS_SCHEMA = vol.Schema({
     vol.Required("preset"): vol.In(PRESETS),
@@ -24,6 +25,7 @@ SETTINGS_SCHEMA = vol.Schema({
     **{vol.Optional(f"entity_{index}"): cv.entity_id for index in (1, 2)},
     **{vol.Optional(f"label_{index}", default=""): vol.All(str, vol.Length(max=80)) for index in (1, 2)},
     **{vol.Optional(f"unit_{index}", default=""): vol.All(str, vol.Length(max=16)) for index in (1, 2)},
+    **{vol.Optional(f"decimals_{index}", default="original"): vol.In(DECIMAL_PLACES) for index in (1, 2)},
 })
 
 
@@ -83,9 +85,19 @@ def _value(settings: dict, index: int) -> str:
     unit = settings.get(f"unit_{index}", "").strip()
     # '-' is an explicit request to hide a native unit; empty means automatic.
     unit_expression = _quoted("" if unit == "-" else unit) if unit else f"(state_attr({entity}, 'unit_of_measurement') or '')"
+    decimals = settings.get(f"decimals_{index}", "original")
+    formatting = ""
+    if decimals != "original":
+        # Round numeric states only. Adding zero avoids a displayed '-0.0'.
+        formatting = (
+            "{% if is_number(value) %}{% set value = " + _quoted(f"%.{decimals}f")
+            + f" | format((value | float | round({decimals})) + 0.0) %}}"
+            "{% endif %}"
+        )
     return (
         "{% set value = states(" + entity + ") %}"
         "{% if value in ['unknown', 'unavailable'] %}—{% else %}"
+        + formatting +
         "{{ value | truncate(128, True, '…') }}"
         "{% set unit = " + unit_expression + " %}"
         "{% if unit %} {{ unit | string | truncate(16, True, '…') }}{% endif %}"

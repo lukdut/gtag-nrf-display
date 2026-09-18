@@ -70,13 +70,17 @@
           "unit_1": "First unit",
           "entity_2": "Second entity",
           "label_2": "Second label",
-          "unit_2": "Second unit"
+          "unit_2": "Second unit",
+          "decimals_1": "Decimal places — first value",
+          "decimals_2": "Decimal places — second value"
         },
         "data_description": {
           "label_1": "Optional. Up to 80 characters; text fits the available space.",
           "label_2": "Optional. Up to 80 characters; text fits the available space.",
           "unit_1": "Optional. Up to 16 characters. Enter - to hide the unit.",
-          "unit_2": "Optional. Up to 16 characters. Enter - to hide the unit."
+          "unit_2": "Optional. Up to 16 characters. Enter - to hide the unit.",
+          "decimals_1": "Rounds numeric values on this screen only. For example, 1: 23.456 → 23.5; 0: 23.456 → 23. No rounding keeps the original value.",
+          "decimals_2": "Rounds numeric values on this screen only. For example, 1: 23.456 → 23.5; 0: 23.456 → 23. No rounding keeps the original value."
         }
       },
       "preview": {
@@ -108,6 +112,18 @@
         "apply": "Apply",
         "edit": "Edit",
         "refresh": "Refresh preview"
+      }
+    },
+    "decimal_places": {
+      "options": {
+        "original": "No rounding",
+        "0": "0",
+        "1": "1",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6"
       }
     }
   },

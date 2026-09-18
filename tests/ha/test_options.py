@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.data_entry_flow import InvalidData
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er, translation
+from homeassistant.helpers.template import Template
 from homeassistant.setup import async_setup_component
 
 from custom_components.gtag_ble_test import display as display_module
@@ -90,6 +91,85 @@ async def test_apply_preset_tracks_values_attributes_and_survives_reload(hass, l
     assert await hass.config_entries.async_reload(loaded.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
     assert sent[-1] == expected.raw and len(sent) == 3
+
+
+@pytest.mark.parametrize(("state", "decimals", "expected"), [
+    ("4.200000286", "original", "4.200000286 V"),
+    ("23.456", "1", "23.5 V"),
+    ("23.7", "0", "24 V"),
+    ("23.4", "2", "23.40 V"),
+    ("0.123456789", "6", "0.123457 V"),
+    ("-0.004", "2", "0.00 V"),
+    ("-1.236", "2", "-1.24 V"),
+    ("4.2e1", "1", "42.0 V"),
+    ("on", "1", "on V"),
+    ("unknown", "1", "—"),
+    ("unavailable", "1", "—"),
+    ("nan", "1", "nan V"),
+    ("inf", "1", "inf V"),
+])
+async def test_numeric_display_format_preserves_non_numeric_states(hass, state, decimals, expected):
+    hass.states.async_set("sensor.value", state, {"unit_of_measurement": "V"})
+    layout = preset_layout({"preset": "single_value", "entity_1": "sensor.value", "decimals_1": decimals})
+    text = layout["elements"][-1]["text"]
+    assert Template(text, hass).async_render(parse_result=False) == expected
+    assert hass.states.get("sensor.value").state == state
+
+
+async def test_decimal_settings_preview_apply_updates_and_reload(hass, loaded, sent):
+    hass.states.async_set("sensor.temperature", "22.567", {"unit_of_measurement": "°C"})
+    hass.states.async_set("sensor.humidity", "48.987", {"unit_of_measurement": "%"})
+    result = await preview(hass, loaded, decimals_1="1", decimals_2="0")
+    expected_preview = result["description_placeholders"]["preview"]
+    assert not sent
+    await apply(hass, result)
+    assert preview_svg(sent[-1]) == expected_preview
+    assert loaded.options["screen"]["decimals_1"] == "1"
+    assert loaded.options["screen"]["decimals_2"] == "0"
+    # Changes beyond the selected precision must not send another framebuffer.
+    hass.states.async_set("sensor.temperature", "22.589", {"unit_of_measurement": "°C"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(sent) == 1
+    hass.states.async_set("sensor.temperature", "22.789", {"unit_of_measurement": "°C"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(sent) == 2
+    expected = await async_render_layout(hass, preset_layout(loaded.options["screen"]))
+    assert sent[-1] == expected.raw
+    assert await hass.config_entries.async_reload(loaded.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert sent[-1] == expected.raw
+    result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {
+        "preset": "clock_two_values", "update_interval": 30,
+    })
+    suggestions = {field.schema: field.description.get("suggested_value")
+                   for field in result["data_schema"].schema}
+    assert suggestions["decimals_1"] == "1" and suggestions["decimals_2"] == "0"
+    # Explicitly returning to the original value is also saved.
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {
+        "entity_1": "sensor.temperature", "entity_2": "sensor.humidity",
+        "decimals_1": "original", "decimals_2": "0",
+    })
+    await apply(hass, result)
+    assert loaded.options["screen"]["decimals_1"] == "original"
+
+
+def test_existing_layouts_keep_original_precision_by_default():
+    settings = validate_settings({"preset": "single_value", "entity_1": "sensor.value"})
+    assert settings["decimals_1"] == settings["decimals_2"] == "original"
+
+
+async def test_invalid_precision_cannot_be_applied(hass, loaded, sent):
+    result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {
+        "preset": "single_value", "update_interval": 5,
+    })
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(result["flow_id"], {
+            "entity_1": "sensor.temperature", "decimals_1": "7",
+        })
+    assert not loaded.options and not sent
+    hass.config_entries.options.async_abort(result["flow_id"])
 
 
 async def test_single_value_custom_labels_units_and_unavailable(hass, loaded, sent):
@@ -177,6 +257,7 @@ async def test_russian_options_translations_are_loaded(hass, loaded):
     assert values[f"component.{DOMAIN}.options.step.init.title"] == "Макет экрана"
     assert "{preview}" in values[f"component.{DOMAIN}.options.step.preview.description"]
     assert "{minimum}" in values[f"component.{DOMAIN}.options.error.stale_after_too_short"]
+    assert "Знаков после запятой" in values[f"component.{DOMAIN}.options.step.values.data.decimals_1"]
 
 
 @pytest.mark.parametrize(("preset", "interval", "stale_after", "minimum"), [
