@@ -367,6 +367,10 @@ class Check:
         await asyncio.to_thread(subprocess.run, ["docker", "compose", "-p", os.environ["GTAG_COMPOSE_PROJECT"],
             "-f", "tests/container/compose.yaml", "restart", "homeassistant"], check=True)
         await self.wait_ready()
+        # HTTP starts before integrations and their entities finish loading.
+        await self.wait_for(lambda: self.request("GET", "/api/config/config_entries/entry?domain=" + DOMAIN),
+                            lambda entries: len(entries) == 1 and entries[0]["state"] == "loaded",
+                            "GTag reload after container restart")
         await self.transfer_done(count)
         assert json.loads(await self.export())["screen"] == self.exported["screen"]
         assert (await self.state("last_update"))["state"] not in ("unknown", "unavailable")
