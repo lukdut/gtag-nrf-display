@@ -101,6 +101,8 @@ gtag_display:
   boot_test_pattern: logo    # logo, none, white, black, checkerboard, stripes
   battery_voltage:          # в конфигурации с пакетами: battery_voltage: !remove
     calibration: 1.0        # поправка по мультиметру, 0.8..1.2
+    empty_voltage: 3.306V    # граница 0% для нелинейной шкалы LiPo (после beta.3)
+    full_voltage: 4.19V     # граница 100%; влияет только на индикацию
 ```
 
 В новых сборках после запуска один раз выводится [заставка GTag с QR-кодом

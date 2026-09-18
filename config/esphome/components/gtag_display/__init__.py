@@ -97,6 +97,12 @@ def reserve_frame_endpoint(config):
     return config
 
 
+def validate_battery_range(config):
+    if round(config["empty_voltage"] * 1000) >= round(config["full_voltage"] * 1000):
+        raise cv.Invalid("full_voltage must exceed empty_voltage by at least 1 mV", ["full_voltage"])
+    return config
+
+
 CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.GenerateID(): cv.declare_id(GTagDisplay),
     cv.GenerateID("zigbee_transport_id"): cv.declare_id(GTagZigbee),
@@ -109,11 +115,13 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     **{cv.Optional(key, default=value): cv.All(gpio_number, pins.internal_gpio_output_pin_number)
        for key, value in LCD_PINS.items()},
     # B+ -- 1M -- ADC GPIO -- 1M -- GND; 100nF from ADC GPIO to GND.
-    cv.Optional(CONF_BATTERY_VOLTAGE): cv.Schema({
+    cv.Optional(CONF_BATTERY_VOLTAGE): cv.All(cv.Schema({
         cv.Optional("pin", default="P0.31"): battery_pin,
         cv.Optional(CONF_CALIBRATION, default=1.0): cv.float_range(min=0.8, max=1.2),
         cv.Optional("indicator", default=True): cv.boolean,
-    }),
+        cv.Optional("empty_voltage", default="3.306V"): cv.All(cv.voltage, cv.Range(min=2.5, max=4.5)),
+        cv.Optional("full_voltage", default="4.19V"): cv.All(cv.voltage, cv.Range(min=2.5, max=4.5)),
+    }), validate_battery_range),
 }).extend(cv.COMPONENT_SCHEMA), validate_pin_assignment, reserve_frame_endpoint)
 
 
@@ -209,6 +217,10 @@ async def to_code(config):
         cg.add(var.set_battery_pin(config[CONF_BATTERY_VOLTAGE]["pin"]))
         cg.add(var.set_battery_calibration(config[CONF_BATTERY_VOLTAGE][CONF_CALIBRATION]))
         cg.add(var.set_battery_indicator(config[CONF_BATTERY_VOLTAGE]["indicator"]))
+        cg.add(var.set_battery_voltage_range(
+            round(config[CONF_BATTERY_VOLTAGE]["empty_voltage"] * 1000),
+            round(config[CONF_BATTERY_VOLTAGE]["full_voltage"] * 1000),
+        ))
     if config[CONF_TRANSPORT] == "zigbee":
         from .zigbee_codegen import add_frame_endpoint
         CORE.add_job(add_frame_endpoint, var, config)

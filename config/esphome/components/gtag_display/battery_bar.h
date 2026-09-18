@@ -5,26 +5,61 @@
 
 namespace esphome::gtag_display::battery_bar {
 
-// An approximate voltage scale, not a calibrated state-of-charge estimate.
-// Empty at 3.3 V, full at 4.2 V; ignore <20 mV changes between accepted samples.
+// Generic LiPo OCV curve, not calibrated for a particular battery.
+// Zephyr BATTERY_OCV_CURVE_LITHIUM_ION_POLYMER_DEFAULT (Analog Devices AN4189),
+// rounded to mV; the requested full-charge endpoint is changed to 4190 mV.
+// https://docs.zephyrproject.org/latest/doxygen/html/group__devicetree-battery.html
+// Points correspond to 0, 10, ... 100 percent. Keep this table independent of
+// the SDK version used for building the firmware.
+constexpr uint16_t OCV_MV[] = {3306, 3687, 3741, 3775, 3793, 3821,
+                               3884, 3945, 4008, 4086, 4190};
+
+// Return hundredths of a percent, or -1 when measurement is unavailable.
+inline int charge_bp(uint16_t mv, uint16_t empty_mv = 3306, uint16_t full_mv = 4190) {
+  if (mv == 0xFFFF || empty_mv >= full_mv) return -1;
+  if (mv <= empty_mv) return 0;
+  if (mv >= full_mv) return 10000;
+  // Scale the voltage axis to configured endpoints; retain sub-mV precision
+  // during interpolation so changing the range does not introduce extra steps.
+  const int voltage = OCV_MV[0] * 1000 +
+      int(int64_t(mv - empty_mv) * (OCV_MV[10] - OCV_MV[0]) * 1000 / (full_mv - empty_mv));
+  for (size_t i = 1; i < 11; ++i) {
+    if (voltage <= OCV_MV[i] * 1000)
+      return int(i - 1) * 1000 + (voltage - OCV_MV[i - 1] * 1000) /
+          (OCV_MV[i] - OCV_MV[i - 1]);
+  }
+  return 10000;
+}
+
 class Gauge {
  public:
+  void set_voltage_range(uint16_t empty_mv, uint16_t full_mv) {
+    empty_mv_ = empty_mv;
+    full_mv_ = full_mv;
+    accepted_bp_ = pixels_ = -1;
+  }
   void update(uint16_t mv) {
-    if (mv == 0xFFFF) {
-      accepted_mv_ = -1;
+    const int charge = charge_bp(mv, empty_mv_, full_mv_);
+    if (charge < 0) {
+      accepted_bp_ = -1;
       pixels_ = -1;
       return;
     }
-    const int delta = int(mv) - accepted_mv_;
-    if (accepted_mv_ >= 0 && delta > -20 && delta < 20)
+    const int delta = charge - accepted_bp_;
+    // Suppress changes below 2 percentage points. Crossings of empty/full
+    // bypass the filter, so the configured full threshold applies immediately.
+    const bool endpoint_changed = (charge == 0) != (accepted_bp_ == 0) ||
+        (charge == 10000) != (accepted_bp_ == 10000);
+    if (accepted_bp_ >= 0 && !endpoint_changed && delta > -200 && delta < 200)
       return;
-    accepted_mv_ = mv;
-    pixels_ = mv <= 3300 ? 0 : mv >= 4200 ? 256 : (int(mv) - 3300) * 256 / 900;
+    accepted_bp_ = charge;
+    pixels_ = charge * 256 / 10000;
   }
   int pixels() const { return pixels_; }
 
  private:
-  int accepted_mv_{-1};
+  uint16_t empty_mv_{3306}, full_mv_{4190};
+  int accepted_bp_{-1};
   int pixels_{-1};
 };
 

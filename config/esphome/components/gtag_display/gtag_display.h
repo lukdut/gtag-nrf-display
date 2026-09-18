@@ -56,6 +56,9 @@ class GTagDisplay : public Component {
   void set_battery_calibration(float value) { battery_calibration_ = value; }
   void set_battery_pin(uint8_t pin) { battery_pin_ = pin; }
   void set_battery_indicator(bool enabled) { battery_indicator_ = enabled; }
+  void set_battery_voltage_range(uint16_t empty_mv, uint16_t full_mv) {
+    battery_bar_.set_voltage_range(empty_mv, full_mv);
+  }
 #endif
 
  protected:

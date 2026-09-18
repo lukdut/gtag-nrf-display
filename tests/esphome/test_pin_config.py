@@ -41,6 +41,7 @@ gtag_display:
                 self.assertEqual(result.returncode, 0, result.stdout)
                 self.assertIn("->set_boot_pattern(gtag_display::BootPattern::LOGO);", code)
                 self.assertIn("->set_battery_indicator(true);", code)
+                self.assertIn("->set_battery_voltage_range(3306, 4190);", code)
                 for setter, number in (("dio_pin", 11), ("clk_pin", 36), ("cs_pin", 38),
                                        ("reset_pin", 45), ("battery_pin", 31)):
                     self.assertIn(f"->set_{setter}({number});", code)
@@ -88,6 +89,18 @@ gtag_display:
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("used in multiple places", result.stdout)
 
+    def test_battery_curve_endpoints(self):
+        result, code = self.run_config("""  battery_voltage:
+    empty_voltage: 3.2V
+    full_voltage: 4.18V
+""", generate=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("->set_battery_voltage_range(3200, 4180);", code)
+        for empty, full in ((4.19, 4.19), (4.2, 3.3), (3.3001, 3.3002), (2.4, 4.19), (3.3, 4.6)):
+            with self.subTest(empty=empty, full=full):
+                result, _ = self.run_config(f"  battery_voltage:\n    empty_voltage: {empty}V\n    full_voltage: {full}V")
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+
     def test_disabling_battery_frees_adc_pin_for_lcd(self):
         result, code = self.run_config("""  dio_pin: P0.31
   battery_voltage: !remove
@@ -96,6 +109,7 @@ gtag_display:
         self.assertIn("->set_dio_pin(31);", code)
         self.assertNotIn("->set_battery_pin(", code)
         self.assertNotIn("->set_battery_indicator(", code)
+        self.assertNotIn("->set_battery_voltage_range(", code)
 
     def test_super52840_no_battery_endpoints_and_bootloader(self):
         with tempfile.TemporaryDirectory(prefix="gtag-super-config-") as temporary:

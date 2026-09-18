@@ -190,21 +190,21 @@ class DisplayTests(unittest.TestCase):
         fw.firmware_disconnect()
         fw.firmware_run(0)
         self.assertEqual(bytes(v & 255 for v in words()[-4096:]), raw[:-96] + bytes(96))
-        # 3200 ADC counts = 3750 mV = half of the voltage scale.
-        fw.firmware_adc_value(3200, 0)
+        # 3261 ADC counts round to 3821 mV: 50% on the LiPo OCV curve.
+        fw.firmware_adc_value(3261, 0)
         before = fw.firmware_frames()
         fw.firmware_run(300_000)
         half = raw[:-96] + (bytes(16) + b'\xff' * 16) * 3
         self.assertEqual(bytes(v & 255 for v in words()[-4096:]), half)
         self.assertEqual(fw.firmware_frames(), before + 1)
         # Small ADC noise and stable samples do not trigger extra redraws.
-        fw.firmware_adc_value(3205, 0)
+        fw.firmware_adc_value(3266, 0)
         fw.firmware_run(600_000)
         self.assertEqual(fw.firmware_frames(), before + 1)
-        fw.firmware_adc_value(3200, -1)
+        fw.firmware_adc_value(3261, -1)
         fw.firmware_run(300_000)
         self.assertEqual(bytes(v & 255 for v in words()[-4096:]), raw)
-        fw.firmware_adc_value(3200, 0)
+        fw.firmware_adc_value(3261, 0)
         fw.firmware_run(300_000)
         self.assertEqual(bytes(v & 255 for v in words()[-4096:]), half)
         # The original CRC/session still accepts a freshness renewal.
@@ -556,7 +556,7 @@ class ZigbeeDisplayTests(unittest.TestCase):
         raw = b'\x55' * 4096
         self.send_frame(raw)
         fw_zigbee.firmware_run(0)
-        fw_zigbee.firmware_adc_value(3200, 0)
+        fw_zigbee.firmware_adc_value(3261, 0)
         fw_zigbee.firmware_run(300_000)
         count = fw_zigbee.firmware_words()
         shown = bytes(fw_zigbee.firmware_word(i) & 255 for i in range(count - 4096, count))
