@@ -330,16 +330,18 @@ export const frameConverter = {
     },
 };
 
-export default {
-    zigbeeModel: ['GTag_Display_Frame_V1'],
-    model: 'GTag Display Zigbee', vendor: 'GTag',
+function definition(battery) {
+    return {
+    zigbeeModel: [battery ? 'GTag_Display_Frame_V1' : 'GTag_Display_Frame_NoBat'],
+    model: battery ? 'GTag Display Zigbee' : 'GTag Display Zigbee (no battery sensor)', vendor: 'GTag',
     description: 'G-Tag 256x128 display on nRF52840, frame protocol v1',
     extend: [
         m.deviceAddCustomCluster('gtagFrame', frameCluster),
-        m.deviceEndpoints({endpoints: {'1': 1, '2': 2, '3': 3, '4': 4}}),
-        m.numeric({name: 'battery_voltage', label: 'Battery voltage', endpointNames: ['1'],
+        // Keep MQTT property names stable when the battery endpoint is absent.
+        m.deviceEndpoints({endpoints: battery ? {'1': 1, '2': 2, '3': 3, '4': 4} : {'2': 1, '3': 2, '4': 3}}),
+        ...(battery ? [m.numeric({name: 'battery_voltage', label: 'Battery voltage', endpointNames: ['1'],
             cluster: 'genAnalogInput', attribute: 'presentValue', unit: 'V', access: 'STATE_GET',
-            reporting: {min: 30, max: 300, change: 0.01}}),
+            reporting: {min: 30, max: 300, change: 0.01}})] : []),
         m.numeric({name: 'rendered_frames', label: 'Rendered frames', endpointNames: ['2'],
             cluster: 'genAnalogInput', attribute: 'presentValue', access: 'STATE_GET',
             reporting: {min: 0, max: 300, change: 1}}),
@@ -382,4 +384,7 @@ export default {
         e.text('power_diagnostics', ea.STATE_GET).withCategory('diagnostic')
             .withDescription('Explicit power-debug snapshot; requires zigbee_power_diagnostics firmware option'),
     ],
-};
+    };
+}
+
+export default [definition(true), definition(false)];

@@ -10,6 +10,7 @@ nRF52840 Pro Micro / nice!nano. Home Assistant передаёт кадр чер�
 |---|---|---|
 | Bluetooth | [gtag-ble.yaml](config/esphome/gtag-ble.yaml) | [nrf-gtag-display.yaml](config/esphome/nrf-gtag-display.yaml) |
 | Zigbee2MQTT | [gtag-zigbee.yaml](config/esphome/gtag-zigbee.yaml) | [nrf-gtag-zigbee.yaml](config/esphome/nrf-gtag-zigbee.yaml) |
+| Zigbee2MQTT, Super52840 без измерения напряжения | [gtag-super52840-zigbee.yaml](config/esphome/gtag-super52840-zigbee.yaml) | [nrf-gtag-super52840-zigbee.yaml](config/esphome/nrf-gtag-super52840-zigbee.yaml) |
 
 Интеграция HA находится в [custom_components/gtag_ble_test](custom_components/gtag_ble_test).
 В подготовленной версии 0.9.0-beta.2 добавлен [автономный значок устаревания](docs/freshness.md)

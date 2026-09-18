@@ -7,10 +7,12 @@ from .entity import GTagEntity
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    async_add_entities([
+    entities = [
         LastUpdate(entry.runtime_data), TransferStatus(entry.runtime_data),
-        BatteryVoltage(entry.runtime_data),
-    ])
+    ]
+    if entry.runtime_data.battery.supported is not False:
+        entities.append(BatteryVoltage(entry.runtime_data))
+    async_add_entities(entities)
 
 
 class BatteryVoltage(GTagEntity, SensorEntity):

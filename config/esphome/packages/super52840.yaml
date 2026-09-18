@@ -1,0 +1,14 @@
+# Hardware overrides for Super52840 with the stock XIAO S140 v7 bootloader.
+# Keep the shared build surrogate: the LCD component disables its peripherals.
+substitutions:
+  gtag_name: nrf-gtag-super52840
+  gtag_friendly_name: GTag Super52840
+
+nrf52:
+  bootloader: adafruit_nrf52_sd140_v7
+
+gtag_display:
+  dio_pin: P1.15   # D10 / 115
+  clk_pin: P1.13   # D8 / 113
+  cs_pin: P1.14    # D9 / 114
+  reset_pin: P1.12 # D7 / 112

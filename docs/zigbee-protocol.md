@@ -4,6 +4,12 @@
 server cluster `0xFC11`. Конвертер ищет endpoint по входному кластеру.
 Endpoints 1–3 сохраняют телеметрию и диагностику первого прототипа.
 
+Вариант без АЦП объявляется как `GTag_Display_Frame_NoBat`: endpoint 1 —
+счётчик кадров, 2 — тестовый узор, 3 — тот же frame cluster `0xFC11`.
+Конвертер сохраняет MQTT-имена `rendered_frames_2` и `display_pattern_3`,
+перенаправляя их на соответствующие физические endpoints; `battery_voltage_1`
+не объявляется. Формат кадров и подтверждений одинаков для обеих моделей.
+
 ZCL: cluster-specific, без manufacturer-specific поля. Client → server command
 `0x00` (`packet`), server → client response `0x80` (`reply`) с той же transaction
 sequence number. Полезная нагрузка — один `OCTET_STR`: байт длины, затем пакет.

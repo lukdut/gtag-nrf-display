@@ -24,6 +24,10 @@ def main() -> None:
             raise SystemExit(f"Wrong package pin in {public}")
         if f"ref: {tag}\n" not in package.read_text():
             raise SystemExit(f"Wrong component pin in {package}")
+    public = ROOT / "config/esphome/gtag-super52840-zigbee.yaml"
+    for package in ("zigbee", "super52840", "zigbee-no-battery"):
+        if f"packages/{package}.yaml@{tag}" not in public.read_text():
+            raise SystemExit(f"Wrong {package} package pin in {public}")
     print(f"Release metadata matches {tag}")
 
 

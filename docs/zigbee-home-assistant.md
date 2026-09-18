@@ -9,7 +9,9 @@
 
 1. Плата должна быть прошита `gtag-zigbee.uf2` из релиза (или ранее проверенным
    `gtag-zigbee-sleep.uf2`) и добавлена в Zigbee2MQTT
-   как `GTag_Display_Frame_V1`. [Прошивка и подключение](zigbee-prototype.md).
+   как `GTag_Display_Frame_V1` или `GTag_Display_Frame_NoBat` без измерения напряжения
+   (начиная с beta.2). [Прошивка и подключение](zigbee-prototype.md),
+   [Super52840 и отключение датчика](pin-remapping.md).
    Уже установленную исправленную сборку повторно прошивать для редактора не нужно.
 2. Установите в Zigbee2MQTT внешний конвертер
    [`gtag-display.mjs`](../zigbee2mqtt/gtag-display.mjs) из этого комплекта.

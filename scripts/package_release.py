@@ -10,6 +10,7 @@ ARTIFACTS = (
     "gtag-ha-integration.zip", "gtag-display.uf2", "gtag-zigbee.uf2",
     "gtag-display-esphome.zip", "gtag-zigbee-esphome.zip",
     "gtag-ble.yaml", "gtag-zigbee.yaml", "gtag-display.mjs",
+    "gtag-super52840-zigbee.uf2", "gtag-super52840-zigbee-esphome.zip", "gtag-super52840-zigbee.yaml",
 )
 
 
@@ -20,6 +21,7 @@ def main() -> None:
             raise SystemExit(f"Missing release artifact: {name}")
     for name in ("gtag-display.uf2", "gtag-zigbee.uf2"):
         validate_uf2(dist / name)
+    validate_uf2(dist / "gtag-super52840-zigbee.uf2", app_start=0x27000)
     package_integration()
     (dist / "SHA256SUMS").write_text("".join(
         f"{sha256((dist / name).read_bytes()).hexdigest()}  {name}\n" for name in ARTIFACTS

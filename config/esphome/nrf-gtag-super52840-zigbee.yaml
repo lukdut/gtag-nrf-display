@@ -1,0 +1,12 @@
+# Super52840: verified XIAO bootloader, S140 7.3.0, application at 0x27000.
+# Separate build/name from the original Pro Micro device. See pin-remapping.md.
+packages:
+  gtag: !include packages/zigbee-base.yaml
+  board: !include packages/super52840.yaml
+  no_battery: !include packages/zigbee-no-battery.yaml
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [gtag_display]

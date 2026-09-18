@@ -139,12 +139,34 @@ try {
         await assert.rejects(confirmFreshness(ep, {...message, sequence: 3}));
     });
     await test('definition loads with pinned Zigbee2MQTT converter dependencies', async () => {
-        const definition = prepareDefinition(converter.default);
+        const definition = prepareDefinition(converter.default[0]);
         assert.ok(definition.toZigbee.includes(frameConverter));
         const properties = definition.exposes.map((expose) => expose.property);
         for (const property of ['test_image', 'frame', 'frame_status', 'frame_error', 'battery_voltage_1', 'display_pattern_3'])
             assert.ok(properties.includes(property), property);
         assert.equal(crc32(Buffer.from('123456789')), 0xcbf43926);
+    });
+    await test('no-battery model omits voltage and maps the remaining endpoints independently', async () => {
+        const normal = prepareDefinition(converter.default[0]);
+        const noBattery = prepareDefinition(converter.default[1]);
+        const properties = noBattery.exposes.map((expose) => expose.property);
+        assert.ok(!properties.includes('battery_voltage_1'));
+        for (const property of ['frame', 'frame_request_id', 'rendered_frames_2', 'display_pattern_3'])
+            assert.ok(properties.includes(property), property);
+        assert.deepEqual(normal.endpoint({}), {'1': 1, '2': 2, '3': 3, '4': 4});
+        assert.deepEqual(noBattery.endpoint({}), {'2': 1, '3': 2, '4': 3});
+        assert.ok(noBattery.toZigbee.includes(frameConverter));
+        // It must not bind/report battery data from endpoint 1 (now frame count).
+        const configured = [];
+        const endpoints = [1, 2, 3].map((ID) => Object.assign(Object.create(Endpoint.prototype), {ID, deviceIeeeAddress: '0xsecond',
+            bind: async (cluster) => configured.push([ID, cluster]),
+            configureReporting: async () => {},
+            read: async () => ({}),
+        }));
+        const device = {addCustomCluster: () => {}, endpoints,
+            getEndpoint: (ID) => endpoints.find((ep) => ep.ID === ID)};
+        await noBattery.configure(device, {}, noBattery);
+        assert.deepEqual(configured, [[1, 'genAnalogInput'], [2, 'genAnalogOutput']]);
     });
     await test('real herdsman controller dispatches the custom reply without crashing', async () => {
         // Decoding with Frame.fromBuffer alone misses command/cluster name
@@ -190,7 +212,7 @@ try {
         const wire = frame.toBuffer();
         assert.equal(wire.length, 44, 'Power snapshot fits a single small Zigbee frame');
         const decoded = Zcl.Frame.fromBuffer(frameCluster.ID, Zcl.Header.fromBuffer(wire), wire, custom);
-        const state = converter.default.fromZigbee[0].convert(null, {data: decoded.payload});
+        const state = converter.default[0].fromZigbee[0].convert(null, {data: decoded.payload});
         const snapshot = JSON.parse(state.power_diagnostics);
         assert.deepEqual(snapshot, {rx_on_when_idle: false, joined: true, uptime_ms: 60000,
             stack_sleep_ms: 55000, stack_sleep_calls: 93, cpu_idle_ms: 54000,
@@ -210,7 +232,7 @@ try {
         const unsupported = Buffer.alloc(20);
         unsupported.set([1, 5, 2]);
         assert.throws(() => parsePowerDiagnostics(unsupported), /diagnostics unavailable/);
-        assert.deepEqual(converter.default.fromZigbee[0].convert(null, {data: {payload: unsupported}}), {});
+        assert.deepEqual(converter.default[0].fromZigbee[0].convert(null, {data: {payload: unsupported}}), {});
         for (const malformed of [Buffer.alloc(40), data.subarray(1), null])
             assert.throws(() => parsePowerDiagnostics(malformed), /diagnostics unavailable/);
     });

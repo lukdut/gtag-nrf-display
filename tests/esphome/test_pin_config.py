@@ -92,6 +92,30 @@ gtag_display:
         self.assertIn("->set_dio_pin(31);", code)
         self.assertNotIn("->set_battery_pin(", code)
 
+    def test_super52840_no_battery_endpoints_and_bootloader(self):
+        with tempfile.TemporaryDirectory(prefix="gtag-super-config-") as temporary:
+            folder = Path(temporary)
+            yaml = folder / "device.yaml"
+            yaml.write_text(f"""packages:
+  gtag: !include {CONFIG / 'nrf-gtag-super52840-zigbee.yaml'}
+esphome:
+  build_path: {folder / 'build'}
+""")
+            result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(yaml)],
+                                    text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            code = (folder / "build/src/main.cpp").read_text()
+            defines = (folder / "build/src/esphome/core/defines.h").read_text()
+            self.assertNotIn("USE_GTAG_BATTERY", defines)
+            self.assertNotIn("gtag_battery_sensor", code)
+            for setter, number in (("dio_pin", 47), ("clk_pin", 45), ("cs_pin", 46), ("reset_pin", 44)):
+                self.assertIn(f"->set_{setter}({number});", code)
+            self.assertIn("zigbee_zigbeesensor_id->set_endpoint(1)", code)
+            self.assertIn("zigbee_zigbeenumber_id->set_endpoint(2)", code)
+            self.assertIn("gtag_display_gtagzigbee_id->set_endpoint(3)", code)
+            self.assertIn("GTag_Display_Frame_NoBat", code)
+            self.assertIn("adafruit_nrf52_sd140_v7", code)
+
 
 if __name__ == "__main__":
     unittest.main()

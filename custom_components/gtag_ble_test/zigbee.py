@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 DISCOVERY_TIMEOUT = 10
 TRANSFER_TIMEOUT = 240
 DEFAULT_BASE_TOPIC = "zigbee2mqtt"
+NO_BATTERY_MODEL = "GTag_Display_Frame_NoBat"
 
 
 def valid_base_topic(value: str) -> str:
@@ -39,7 +40,7 @@ def devices_from_payload(payload: str) -> dict[str, dict]:
         return {}
     devices = {}
     for item in values:
-        if not isinstance(item, dict) or item.get("model_id") != "GTag_Display_Frame_V1":
+        if not isinstance(item, dict) or item.get("model_id") not in ("GTag_Display_Frame_V1", NO_BATTERY_MODEL):
             continue
         ieee = item.get("ieee_address", "")
         name = item.get("friendly_name")
@@ -50,7 +51,8 @@ def devices_from_payload(payload: str) -> dict[str, dict]:
         exposes = definition.get("exposes", []) if isinstance(definition, dict) else []
         properties = {e["property"] for e in exposes
                       if isinstance(e, dict) and isinstance(e.get("property"), str)} if isinstance(exposes, list) else set()
-        devices[ieee.lower()] = {"friendly_name": name, "compatible": "frame_request_id" in properties}
+        devices[ieee.lower()] = {"friendly_name": name, "compatible": "frame_request_id" in properties,
+                                 "battery_supported": item["model_id"] != NO_BATTERY_MODEL}
     return devices
 
 
@@ -102,7 +104,7 @@ class ZigbeeTransport:
         self._recovered = recovered
         self._voltage: float | None = None
         self.last_read = None
-        self.supported: bool | None = None
+        self.supported: bool | None = entry.data.get("battery_supported")
         self._battery_error: str | None = None
         self._connected = False
         self._bridge_online: bool | None = None
@@ -190,6 +192,12 @@ class ZigbeeTransport:
         device = devices_from_payload(message.payload).get(self.address)
         was_available = self.available
         self._present = device is not None
+        if device is not None:
+            self.supported = device["battery_supported"]
+            if not self.supported:
+                self._voltage = None
+                self._battery_error = None
+                self.last_read = None
         if device is None:
             self._fail_pending("GTag is missing from Zigbee2MQTT")
             self._notify()
@@ -221,7 +229,7 @@ class ZigbeeTransport:
     @callback
     def _state(self, message) -> None:
         state = _json_object(message.payload)
-        if "battery_voltage_1" in state:
+        if self.supported is not False and "battery_voltage_1" in state:
             value = state["battery_voltage_1"]
             valid = (isinstance(value, (int, float)) and not isinstance(value, bool)
                      and math.isfinite(value) and 0 <= value <= 6)

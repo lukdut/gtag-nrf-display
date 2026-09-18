@@ -349,6 +349,48 @@ async def test_flow_selects_transport_and_discovers_by_ieee(hass, broker, monkey
     assert not any(broker.callbacks.values())
 
 
+async def test_second_device_without_battery_has_no_voltage_entity(hass, broker, sent, battery_client):
+    first = make_entry(hass)
+    second = make_entry(hass, SECOND, "second")
+    no_battery = {**inventory(SECOND, "second"), "model_id": module.NO_BATTERY_MODEL}
+    broker.retained["zigbee2mqtt/bridge/devices"].append(no_battery)
+    # Ignore an old retained reading if firmware used to include the ADC.
+    broker.retained["zigbee2mqtt/second"] = {"battery_voltage_1": 4.0}
+    assert await async_setup_component(hass, DOMAIN, {})
+    await hass.async_block_till_done()
+    registry = er.async_get(hass)
+    assert registry.async_get_entity_id("sensor", DOMAIN, f"zigbee:{IEEE}_battery_voltage")
+    assert not registry.async_get_entity_id("sensor", DOMAIN, f"zigbee:{SECOND}_battery_voltage")
+    broker.receive("zigbee2mqtt/second", {"battery_voltage_1": 4.1})
+    broker.receive("zigbee2mqtt/room/display", {"battery_voltage_1": 4.2})
+    assert first.runtime_data.battery.voltage == 4.2
+    assert second.runtime_data.battery.voltage is None
+    assert second.runtime_data.battery.supported is False
+    assert second.runtime_data.battery.last_error is None
+    assert second.runtime_data.battery.last_read is None
+    async def confirm(topic, data):
+        broker.confirm(data, name="second")
+    broker.hook = confirm
+    await second.runtime_data.async_draw({"elements": []})
+    assert second.runtime_data.status == "sent"
+    assert not sent
+    battery_client.read_gatt_char.assert_not_awaited()
+    for entry in (first, second):
+        assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_no_battery_model_can_be_added_through_flow(hass, broker, monkeypatch):
+    broker.retained["zigbee2mqtt/bridge/devices"] = [
+        {**inventory(), "model_id": module.NO_BATTERY_MODEL}]
+    monkeypatch.setattr("custom_components.gtag_ble_test.async_setup_entry", AsyncMock(return_value=True))
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "zigbee"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"base_topic": "zigbee2mqtt"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"address": IEEE})
+    assert result["type"] == "create_entry"
+    assert result["data"]["battery_supported"] is False
+
+
 @pytest.mark.parametrize("case,error", [
     ("mqtt", "mqtt_not_ready"), ("empty", "no_zigbee_devices"),
     ("old", "converter_update_required"), ("topic", "invalid_topic"), ("timeout", "cannot_connect"),

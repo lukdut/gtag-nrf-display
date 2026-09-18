@@ -1,0 +1,11 @@
+# Apply after zigbee-base.yaml (or the public zigbee.yaml package).
+# Remove both ADC sampling and the Zigbee battery endpoint. The model tells
+# Zigbee2MQTT/HA which capabilities and endpoint numbering to use.
+gtag_display:
+  battery_voltage: !remove
+
+zigbee:
+  model: GTag_Display_Frame_NoBat
+
+sensor:
+  - id: !remove gtag_battery_sensor

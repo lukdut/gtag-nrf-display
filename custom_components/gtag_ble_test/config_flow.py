@@ -119,6 +119,7 @@ class GTagBLETestConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=device["friendly_name"], data={
                 CONF_TRANSPORT: TRANSPORT_ZIGBEE, CONF_ADDRESS: address,
                 "base_topic": self._base_topic, "friendly_name": device["friendly_name"],
+                "battery_supported": device["battery_supported"],
             })
         return self.async_show_form(step_id="zigbee_device", data_schema=vol.Schema({
             vol.Required(CONF_ADDRESS): vol.In({

@@ -19,9 +19,17 @@ jobs:
       matrix:
         include:
           - profile: ble
+            board: promicro
+            config: gtag-ble
             device: nrf-gtag-display
           - profile: zigbee
+            board: promicro
+            config: gtag-zigbee
             device: nrf-gtag-zigbee
+          - profile: zigbee
+            board: super52840
+            config: gtag-super52840-zigbee
+            device: nrf-gtag-super52840
     env:
       ESPHOME_SDK_NRF_PREFIX: ${{ github.workspace }}/.nrf-sdk
     steps:
@@ -44,18 +52,19 @@ jobs:
           key: nrf-sdk-${{ runner.os }}-${{ runner.arch }}-2.9.2-esphome-2026.9.0
       - name: Build the public ESPHome configuration
         env:
-          PROFILE: ${{ matrix.profile }}
-        run: esphome compile "config/esphome/gtag-$PROFILE.yaml"
+          CONFIG: ${{ matrix.config }}
+        run: esphome compile "config/esphome/$CONFIG.yaml"
       - name: Package firmware and ESPHome sources
         env:
           PROFILE: ${{ matrix.profile }}
+          BOARD: ${{ matrix.board }}
           DEVICE: ${{ matrix.device }}
         run: |
-          python scripts/package_firmware.py --profile "$PROFILE" \
+          python scripts/package_firmware.py --profile "$PROFILE" --board "$BOARD" \
             --uf2 "config/esphome/.esphome/build/$DEVICE/.pioenvs/$DEVICE/zephyr/zephyr.uf2"
       - uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.profile }}
+          name: firmware-${{ matrix.board }}-${{ matrix.profile }}
           path: dist/*
           if-no-files-found: error
   publish:

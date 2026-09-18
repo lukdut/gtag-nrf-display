@@ -16,5 +16,5 @@ packages:
 #   reset_pin: P1.13
 #   battery_voltage:
 #     pin: P0.31
-# If the divider is not fitted, replace battery_voltage above with:
-#   battery_voltage: !remove
+# To omit ADC sampling and battery entities, add to packages above:
+#   no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v0.9.0-beta.2
