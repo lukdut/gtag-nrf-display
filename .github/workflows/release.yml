@@ -10,8 +10,10 @@ permissions:
 jobs:
   tests:
     uses: ./.github/workflows/tests.yml
+  compatibility:
+    uses: ./.github/workflows/compatibility.yml
   firmware:
-    needs: tests
+    needs: [tests, compatibility]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:

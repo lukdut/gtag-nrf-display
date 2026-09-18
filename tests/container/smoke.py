@@ -139,24 +139,31 @@ class Check:
             return await response.json()
 
     async def wait_ready(self):
+        # HA stops registering onboarding endpoints on subsequent starts.
+        path = "/api/config" if self.token else "/api/onboarding"
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         async with asyncio.timeout(180):
             while True:
                 try:
-                    async with self.session.get(BASE + "/api/onboarding") as response:
-                        if response.status in (200, 401):
+                    async with self.session.get(BASE + path, headers=headers) as response:
+                        if response.status == 200:
                             return
                 except (aiohttp.ClientError, TimeoutError):
                     pass
                 await asyncio.sleep(1)
 
     async def wait_for(self, operation, predicate, label, timeout=60):
-        async with asyncio.timeout(timeout):
-            while True:
-                assert not self.device.errors, self.device.errors
-                value = await operation()
-                if predicate(value):
-                    return value
-                await asyncio.sleep(0.5)
+        value = None
+        try:
+            async with asyncio.timeout(timeout):
+                while True:
+                    assert not self.device.errors, self.device.errors
+                    value = await operation()
+                    if predicate(value):
+                        return value
+                    await asyncio.sleep(0.5)
+        except TimeoutError as err:
+            raise AssertionError(f"Timed out: {label}; last result: {value}") from err
 
     async def ws(self, command):
         async with self.session.ws_connect(BASE + "/api/websocket") as socket:
