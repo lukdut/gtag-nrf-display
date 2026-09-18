@@ -384,6 +384,9 @@ bool GTagDisplay::commit_frame() {
 
   if (first_commit) {
     std::memcpy(this->display_frame_.data(), this->decoded_frame_.data(), FRAME_BYTES);
+#ifdef USE_GTAG_BATTERY
+    this->battery_overlay_allowed_.store(true);
+#endif
     const auto &descriptor = this->receiver_.descriptor();
     k_mutex_lock(&this->freshness_mutex_, K_FOREVER);
     this->freshness_.frame(descriptor.frame_id, descriptor.raw_crc32,
@@ -521,6 +524,10 @@ void GTagDisplay::process_zigbee_packet(const uint8_t *data, size_t len,
 void GTagDisplay::queue_pattern_(BootPattern pattern) {
   if (pattern == BootPattern::NONE)
     return;
+#ifdef USE_GTAG_BATTERY
+  // Keep diagnostic patterns exact; the normal boot logo may show the bar.
+  this->battery_overlay_allowed_.store(pattern == BootPattern::LOGO);
+#endif
   k_mutex_lock(&this->freshness_mutex_, K_FOREVER);
   this->freshness_.clear();
   k_mutex_unlock(&this->freshness_mutex_);
@@ -709,6 +716,10 @@ bool GTagDisplay::send_frame_(const uint8_t *frame) {
 
   const uint32_t started = k_uptime_get_32();
   const uint32_t old_words = this->words_;
+#ifdef USE_GTAG_BATTERY
+  const int battery_pixels = this->battery_indicator_ && this->battery_overlay_allowed_.load()
+      ? this->battery_bar_.pixels() : -1;
+#endif
 
   if (!this->address_(0) ||
       !this->word_(false, 0x2C)) {
@@ -716,7 +727,10 @@ bool GTagDisplay::send_frame_(const uint8_t *frame) {
   }
 
   for (size_t i = 0; i < FRAME_BYTES; ++i) {
-    const uint8_t value = frame[i] ^ (this->stale_overlay_ ? freshness::mask(i) : 0);
+    uint8_t value = frame[i] ^ (this->stale_overlay_ ? freshness::mask(i) : 0);
+#ifdef USE_GTAG_BATTERY
+    value = battery_bar::overlay(i, value, battery_pixels);
+#endif
     if (!this->word_(true, value))
       return false;
 
@@ -727,6 +741,9 @@ bool GTagDisplay::send_frame_(const uint8_t *frame) {
   this->write_(Signal::DIO, false);
 
   ++this->frames_;
+#ifdef USE_GTAG_BATTERY
+  this->shown_battery_pixels_ = battery_pixels;
+#endif
 
   ESP_LOGI(
       TAG,
@@ -898,6 +915,13 @@ void GTagDisplay::sample_battery_() {
     const float mv = (raw > 0 ? raw : 0) * (4800.0f / 4096.0f) * this->battery_calibration_;
     this->battery_mv_.store(static_cast<uint16_t>(mv + 0.5f));
     ESP_LOGI(TAG, "Battery: %u mV", unsigned(this->battery_mv()));
+  }
+  this->battery_bar_.update(this->battery_mv());
+  const int pixels = this->battery_indicator_ && this->battery_overlay_allowed_.load()
+      ? this->battery_bar_.pixels() : -1;
+  if (this->frames_ > 0 && pixels != this->shown_battery_pixels_) {
+    this->frame_pending_.store(true);
+    this->enable_loop_soon_any_context();
   }
   // Zephyr's nRF SAADC driver stops and disables the ADC after adc_read().
   // This timer wakes the scheduler once per five minutes, with no polling loop.

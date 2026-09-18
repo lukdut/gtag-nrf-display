@@ -121,8 +121,8 @@ def preset_layout(settings: dict[str, Any]) -> dict[str, Any]:
         ]
     elif settings["preset"] == "clock_two_values":
         elements = [
-            text(8, 8, "{{ now().strftime('%H:%M') }}", 28, 112),
-            text(248, 18, "{{ now().strftime('%d.%m.%Y') }}", 16, 122, "right"),
+            text(8, 13, "{{ now().strftime('%H:%M') }}", 28, 112),
+            text(248, 23, "{{ now().strftime('%d.%m.%Y') }}", 16, 122, "right"),
             line(8, 42, 247, 42), line(128, 53, 128, 119),
             text(8, 54, _label(settings, 1), 16, 112),
             text(140, 54, _label(settings, 2), 16, 108),

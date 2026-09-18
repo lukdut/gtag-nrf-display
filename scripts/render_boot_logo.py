@@ -87,7 +87,8 @@ def main() -> None:
     center_text(draw, "GTag", 69, 55, 32, stroke=1)
     center_text(draw, "D I S P L A Y", 69, 94, 9)
     draw.line((10, 112, 245, 112), fill=0)
-    center_text(draw, VISIBLE_URL, 128, 117, 10)
+    # Keep rows 125..127 free for the on-device battery indicator.
+    center_text(draw, VISIBLE_URL, 128, 115, 10)
 
     # Validate the composed screen, including neighbouring text and graphics.
     results = zxingcpp.read_barcodes(screen.convert("RGB"))

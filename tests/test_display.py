@@ -24,7 +24,7 @@ from saleae_reference import reference_words
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "config/esphome/components/gtag_display"
 # Golden LCD bytes of the approved docs/design/boot-logo.png, packed LSB-first.
-BOOT_LOGO_SHA256 = "c1c5a7aa6c9a6a62118b9cb7f7a1551f19466a77c9aa8d56c7e56c05edcdbba8"
+BOOT_LOGO_SHA256 = "47652d475a45ae7ae657dccc03a55afcdafee0ebf0551d7c54a7c2c0e13146f7"
 
 
 def module(name, **attributes):
@@ -180,6 +180,56 @@ class BootLogoTests(unittest.TestCase):
 class DisplayTests(unittest.TestCase):
     def setUp(self):
         start()
+
+    def test_battery_bar_updates_offline_and_restores_original_rows_on_adc_error(self):
+        fw.firmware_battery_indicator(True)
+        raw = bytes(range(256)) * 16
+        fw.firmware_connect()
+        begin(raw)
+        self.assertEqual(commit(), 1)
+        fw.firmware_disconnect()
+        fw.firmware_run(0)
+        self.assertEqual(bytes(v & 255 for v in words()[-4096:]), raw[:-96] + bytes(96))
+        # 3200 ADC counts = 3750 mV = half of the voltage scale.
+        fw.firmware_adc_value(3200, 0)
+        before = fw.firmware_frames()
+        fw.firmware_run(300_000)
+        half = raw[:-96] + (bytes(16) + b'\xff' * 16) * 3
+        self.assertEqual(bytes(v & 255 for v in words()[-4096:]), half)
+        self.assertEqual(fw.firmware_frames(), before + 1)
+        # Small ADC noise and stable samples do not trigger extra redraws.
+        fw.firmware_adc_value(3205, 0)
+        fw.firmware_run(600_000)
+        self.assertEqual(fw.firmware_frames(), before + 1)
+        fw.firmware_adc_value(3200, -1)
+        fw.firmware_run(300_000)
+        self.assertEqual(bytes(v & 255 for v in words()[-4096:]), raw)
+        fw.firmware_adc_value(3200, 0)
+        fw.firmware_run(300_000)
+        self.assertEqual(bytes(v & 255 for v in words()[-4096:]), half)
+        # The original CRC/session still accepts a freshness renewal.
+        fw.firmware_connect()
+        packet = struct.pack('<BIII', 3, 1, zlib.crc32(raw), 1)
+        self.assertEqual(fw.firmware_control(packet, len(packet)), len(packet))
+        fw.firmware_disconnect()
+        fw.firmware_run(0)
+
+    def test_battery_bar_waits_for_ble_disconnect_and_empty_scale_is_white(self):
+        fw.firmware_battery_indicator(True)
+        raw = b'\x55' * 4096
+        fw.firmware_connect()
+        begin(raw)
+        commit()
+        fw.firmware_disconnect()
+        fw.firmware_run(0)
+        before = fw.firmware_frames()
+        fw.firmware_connect()
+        fw.firmware_adc_value(2800, 0)  # Below 3.3 V: empty.
+        fw.firmware_run(300_000)
+        self.assertEqual(fw.firmware_frames(), before)
+        fw.firmware_disconnect()
+        fw.firmware_run(0)
+        self.assertEqual(bytes(v & 255 for v in words()[-4096:]), raw[:-96] + b'\xff' * 96)
 
     def test_first_ble_frame_replaces_boot_logo(self):
         fw.firmware_create(5, 1000)
@@ -498,6 +548,32 @@ class ZigbeeDisplayTests(unittest.TestCase):
             data = struct.pack('<BIH', 2, session, offset) + encoded.payload[offset:offset + 32]
             self.assertEqual(self.packet(data)[2], 0)
         return self.packet(struct.pack('<BI', 3, session))
+
+    def test_battery_bar_preserves_zigbee_confirmation_and_diagnostics(self):
+        fw_zigbee.firmware_battery_indicator(True)
+        fw_zigbee.firmware_run(4000)
+        self.assertEqual(fw_zigbee.firmware_word(fw_zigbee.firmware_words() - 1), 0x100)
+        raw = b'\x55' * 4096
+        self.send_frame(raw)
+        fw_zigbee.firmware_run(0)
+        fw_zigbee.firmware_adc_value(3200, 0)
+        fw_zigbee.firmware_run(300_000)
+        count = fw_zigbee.firmware_words()
+        shown = bytes(fw_zigbee.firmware_word(i) & 255 for i in range(count - 4096, count))
+        self.assertEqual(shown, raw[:-96] + (bytes(16) + b'\xff' * 16) * 3)
+        reply = self.packet(struct.pack('<BI', 4, 123))
+        self.assertEqual(reply[15], 2)
+        self.assertEqual(int.from_bytes(reply[16:20], 'little'), 123)
+        self.assertEqual(self.packet(struct.pack('<BIII', 6, 123, zlib.crc32(raw), 1))[2], 0)
+        # A diagnostic black screen must remain entirely black, even on ADC updates.
+        fw_zigbee.firmware_pattern(1)
+        fw_zigbee.firmware_run(0)
+        before = fw_zigbee.firmware_frames()
+        fw_zigbee.firmware_adc_value(3300, 0)
+        fw_zigbee.firmware_run(300_000)
+        self.assertEqual(fw_zigbee.firmware_frames(), before)
+        count = fw_zigbee.firmware_words()
+        self.assertEqual([fw_zigbee.firmware_word(i) for i in range(count - 4096, count)], [0x100] * 4096)
 
     def test_remapped_zigbee_pins_deliver_the_same_lcd_bytes(self):
         fw_zigbee.firmware_create_with_pins(0, 1000, 6, 8, 15, 17, 4)

@@ -59,6 +59,8 @@ void firmware_create_with_pins(unsigned pattern, unsigned interval, unsigned dio
   display->set_reset_pin(reset);
 #ifdef USE_GTAG_BATTERY
   display->set_battery_pin(battery_pin);
+  // Existing wire-protocol tests require the unmodified source framebuffer.
+  display->set_battery_indicator(false);
 #endif
   display->setup();
 }
@@ -66,6 +68,9 @@ void firmware_create(unsigned pattern, unsigned interval) {
   firmware_create_with_pins(pattern, interval, 11, 36, 38, 45, 31);
 }
 void firmware_run(unsigned ms) { run_until(sim::now_us + uint64_t(ms) * 1000); }
+#ifdef USE_GTAG_BATTERY
+void firmware_battery_indicator(bool enabled) { display->set_battery_indicator(enabled); }
+#endif
 void firmware_set_time(unsigned ms) { sim::now_us = uint64_t(ms) * 1000; }
 void firmware_clock_wrap(unsigned subtract_ms) { sim::now_us += ((uint64_t(1) << 32) - subtract_ms) * 1000; }
 #ifndef USE_GTAG_ZIGBEE

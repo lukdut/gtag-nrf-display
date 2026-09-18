@@ -40,6 +40,7 @@ gtag_display:
                 result, code = self.run_config(profile=profile, generate=True)
                 self.assertEqual(result.returncode, 0, result.stdout)
                 self.assertIn("->set_boot_pattern(gtag_display::BootPattern::LOGO);", code)
+                self.assertIn("->set_battery_indicator(true);", code)
                 for setter, number in (("dio_pin", 11), ("clk_pin", 36), ("cs_pin", 38),
                                        ("reset_pin", 45), ("battery_pin", 31)):
                     self.assertIn(f"->set_{setter}({number});", code)
@@ -50,8 +51,10 @@ gtag_display:
   reset_pin: P0.17
   battery_voltage:
     pin: P0.04
+    indicator: false
 """, profile=profile, generate=True)
                 self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn("->set_battery_indicator(false);", code)
                 for setter, number in (("dio_pin", 32), ("clk_pin", 8), ("cs_pin", 47),
                                        ("reset_pin", 17), ("battery_pin", 4)):
                     self.assertIn(f"->set_{setter}({number});", code)
@@ -92,6 +95,7 @@ gtag_display:
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("->set_dio_pin(31);", code)
         self.assertNotIn("->set_battery_pin(", code)
+        self.assertNotIn("->set_battery_indicator(", code)
 
     def test_super52840_no_battery_endpoints_and_bootloader(self):
         with tempfile.TemporaryDirectory(prefix="gtag-super-config-") as temporary:

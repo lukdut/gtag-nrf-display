@@ -10,6 +10,9 @@
 #include "esphome/core/defines.h"
 #include "frame_protocol.h"
 #include "zigbee_protocol.h"
+#ifdef USE_GTAG_BATTERY
+#include "battery_bar.h"
+#endif
 
 namespace esphome {
 namespace gtag_display {
@@ -52,6 +55,7 @@ class GTagDisplay : public Component {
 #ifdef USE_GTAG_BATTERY
   void set_battery_calibration(float value) { battery_calibration_ = value; }
   void set_battery_pin(uint8_t pin) { battery_pin_ = pin; }
+  void set_battery_indicator(bool enabled) { battery_indicator_ = enabled; }
 #endif
 
  protected:
@@ -89,6 +93,10 @@ class GTagDisplay : public Component {
   float battery_calibration_{1.0f};
   uint8_t battery_pin_{31};
   bool battery_adc_ready_{false};
+  bool battery_indicator_{true};
+  std::atomic<bool> battery_overlay_allowed_{false};
+  battery_bar::Gauge battery_bar_;
+  int shown_battery_pixels_{-1};
 #endif
   std::atomic<uint16_t> battery_mv_{0xFFFF};
 

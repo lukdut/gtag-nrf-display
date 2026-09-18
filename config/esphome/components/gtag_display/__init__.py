@@ -112,6 +112,7 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.Optional(CONF_BATTERY_VOLTAGE): cv.Schema({
         cv.Optional("pin", default="P0.31"): battery_pin,
         cv.Optional(CONF_CALIBRATION, default=1.0): cv.float_range(min=0.8, max=1.2),
+        cv.Optional("indicator", default=True): cv.boolean,
     }),
 }).extend(cv.COMPONENT_SCHEMA), validate_pin_assignment, reserve_frame_endpoint)
 
@@ -207,6 +208,7 @@ async def to_code(config):
         zephyr_add_prj_conf("ADC", True)
         cg.add(var.set_battery_pin(config[CONF_BATTERY_VOLTAGE]["pin"]))
         cg.add(var.set_battery_calibration(config[CONF_BATTERY_VOLTAGE][CONF_CALIBRATION]))
+        cg.add(var.set_battery_indicator(config[CONF_BATTERY_VOLTAGE]["indicator"]))
     if config[CONF_TRANSPORT] == "zigbee":
         from .zigbee_codegen import add_frame_endpoint
         CORE.add_job(add_frame_endpoint, var, config)
