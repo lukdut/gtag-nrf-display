@@ -16,10 +16,11 @@ sequence number. Полезная нагрузка — один `OCTET_STR`: б�
 
 | Opcode | Содержимое после opcode | Длина пакета |
 |---|---|---|
-| 1 BEGIN | version:u8=1, codec:u8, encoded_size:u16, session:u32, raw_crc32:u32 | 13 |
+| 1 BEGIN | version:u8=1, codec:u8, encoded_size:u16, session:u32, raw_crc32:u32, freshness_timeout_s:u32 | 17 |
 | 2 DATA | session:u32, offset:u16, data:1..32 bytes | 8..39 |
 | 3 COMMIT | session:u32 | 5 |
 | 4 STATUS | session:u32 | 5 |
+| 6 FRESHNESS | session:u32, raw_crc32:u32, sequence:u32 | 13 |
 
 Кодеки и CRC совпадают с BLE: RAW=0, WHITE_RLE_V1=1, CRC-32/IEEE от
 несжатого кадра 4096 байтов. DATA содержит смещение в **сжатом** потоке.
@@ -31,7 +32,9 @@ DATA/COMMIT с чужой сессией отклоняются. STATUS возв
 даже если запрос содержит другой идентификатор: так отправитель обнаруживает
 перезапуск устройства. Входные длины проверяются до изменения приёмника.
 
-## Ответ на BEGIN/DATA/COMMIT/STATUS: 20 байтов
+Описание срока актуальности и повторов подтверждения: [freshness.md](freshness.md).
+
+## Ответ на BEGIN/DATA/COMMIT/STATUS/FRESHNESS: 20 байтов
 
 | Смещение | Размер | Значение |
 |---|---|---|
@@ -43,7 +46,7 @@ DATA/COMMIT с чужой сессией отклоняются. STATUS возв
 | 8 | 2 | Принято байтов сжатого потока |
 | 10 | 4 | CRC приёмника |
 | 14 | 1 | Ошибка общего frame::Receiver, 0 = нет |
-| 15 | 1 | Flags: bit 0 — ожидается вывод на LCD; bit 1 — на LCD выведен проверенный кадр |
+| 15 | 1 | Flags: bit 0 — ожидается вывод на LCD; bit 1 — выведен проверенный кадр; bit 2 — на LCD показан значок устаревания |
 | 16 | 4 | Идентификатор последнего выведенного проверенного кадра |
 
 COMPLETE подтверждает декодирование и CRC, но **не** завершение вывода.

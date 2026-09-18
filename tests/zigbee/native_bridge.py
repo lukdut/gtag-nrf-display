@@ -30,6 +30,9 @@ try:
         elif command == 'hold':
             hold = message['value']
             result = {}
+        elif command == 'advance':
+            fw.firmware_run(message['ms'])
+            result = {}
         elif command == 'inspect':
             count = fw.firmware_words()
             raw = bytes(fw.firmware_word(i) & 255 for i in range(count - 4096, count))

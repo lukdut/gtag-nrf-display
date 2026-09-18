@@ -175,12 +175,13 @@ ssize_t write_control(struct bt_conn *, const struct bt_gatt_attr *,
     // bytes 9..12: CRC32 of the DECODED 4096-byte framebuffer
     //
     // This descriptor is not Bluetooth-specific; BLE is only one adapter.
-    if (len == 13) {
+    if (len == 13 || len == 17) {
       descriptor.version = p[1];
       descriptor.codec = static_cast<frame::Codec>(p[2]);
       descriptor.encoded_size = read_le16(p + 3);
       descriptor.frame_id = read_le32(p + 5);
       descriptor.raw_crc32 = read_le32(p + 9);
+      descriptor.freshness_timeout_s = len == 17 ? read_le32(p + 13) : 0;
     } else if (len == 9) {
       // Backward compatibility with the previous reliable BLE sender:
       // 0x01 | frame_id:u32 | raw_crc32:u32
@@ -207,6 +208,11 @@ ssize_t write_control(struct bt_conn *, const struct bt_gatt_attr *,
     return instance->commit_frame()
         ? len
         : BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+  }
+
+  if (p[0] == 0x03 && len == 13) {
+    return instance->renew_freshness(read_le32(p + 1), read_le32(p + 5), read_le32(p + 9))
+        ? len : BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
   }
 
   return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
@@ -384,6 +390,11 @@ bool GTagDisplay::commit_frame() {
 
   if (first_commit) {
     std::memcpy(this->display_frame_.data(), this->decoded_frame_.data(), FRAME_BYTES);
+    const auto &descriptor = this->receiver_.descriptor();
+    k_mutex_lock(&this->freshness_mutex_, K_FOREVER);
+    this->freshness_.frame(descriptor.frame_id, descriptor.raw_crc32,
+                           descriptor.freshness_timeout_s, k_uptime_get_32());
+    k_mutex_unlock(&this->freshness_mutex_);
 #ifdef USE_GTAG_ZIGBEE
     this->queued_frame_id_ = this->receiver_.descriptor().frame_id;
     this->queued_verified_ = true;
@@ -402,6 +413,31 @@ bool GTagDisplay::commit_frame() {
   return true;
 }
 
+bool GTagDisplay::renew_freshness(uint32_t id, uint32_t crc, uint32_t sequence) {
+  if (this->receiver_.state() != frame::State::COMPLETE ||
+      this->receiver_.descriptor().frame_id != id || this->receiver_.actual_raw_crc32() != crc)
+    return false;
+  k_mutex_lock(&this->freshness_mutex_, K_FOREVER);
+  const bool accepted = this->freshness_.renew(id, crc, sequence, k_uptime_get_32());
+  k_mutex_unlock(&this->freshness_mutex_);
+  if (accepted) this->enable_loop_soon_any_context();
+  return accepted;
+}
+
+void GTagDisplay::service_freshness_() {
+  const uint32_t now = k_uptime_get_32();
+  k_mutex_lock(&this->freshness_mutex_, K_FOREVER);
+  this->stale_overlay_ = this->freshness_.expired(now);
+  const uint32_t remaining = this->freshness_.remaining(now);
+  k_mutex_unlock(&this->freshness_mutex_);
+  if (remaining != 0) {
+    this->set_timeout("freshness", remaining, [this]() { this->enable_loop_soon_any_context(); });
+  } else {
+    this->cancel_timeout("freshness");
+  }
+  if (this->stale_overlay_ != this->shown_stale_overlay_)
+    this->frame_pending_.store(true);
+}
 
 #ifndef USE_GTAG_ZIGBEE
 bool GTagDisplay::start_advertising_() {
@@ -444,18 +480,22 @@ void GTagDisplay::process_zigbee_packet(const uint8_t *data, size_t len,
   Result result = Result::INVALID;
   const uint8_t command = data != nullptr && len > 0 ? data[0] : 0;
   if (data != nullptr && len > 0 && len <= MAX_PACKET_SIZE && !this->is_failed()) {
-    if (command == uint8_t(Command::BEGIN) && len == 13) {
+    if (command == uint8_t(Command::BEGIN) && (len == 13 || len == 17)) {
       frame::Descriptor descriptor{};
       descriptor.version = data[1];
       descriptor.codec = static_cast<frame::Codec>(data[2]);
       descriptor.encoded_size = read16(data + 3);
       descriptor.frame_id = read32(data + 5);
       descriptor.raw_crc32 = read32(data + 9);
+      descriptor.freshness_timeout_s = len == 17 ? read32(data + 13) : 0;
       if (this->frame_pending_.load() && !(descriptor == this->receiver_.descriptor())) {
         result = Result::BUSY;
       } else {
         result = this->begin_frame(descriptor) == frame::BeginResult::REJECTED ? Result::RECEIVER : Result::OK;
       }
+    } else if (command == uint8_t(Command::FRESHNESS) && len == 13) {
+      result = this->renew_freshness(read32(data + 1), read32(data + 5), read32(data + 9))
+          ? Result::OK : Result::SESSION;
     } else if ((command == uint8_t(Command::DATA) && len >= 8) ||
                ((command == uint8_t(Command::COMMIT) || command == uint8_t(Command::STATUS)) && len == 5)) {
       const uint32_t session = read32(data + 1);
@@ -478,7 +518,8 @@ void GTagDisplay::process_zigbee_packet(const uint8_t *data, size_t len,
   write32(reply + 3, this->receiver_.descriptor().frame_id);
   this->get_status(reply + 7);
   reply[15] = (this->frame_pending_.load() ? FLAG_PENDING : 0) |
-              (this->rendered_verified_ ? FLAG_RENDERED : 0);
+              (this->rendered_verified_ ? FLAG_RENDERED : 0) |
+              (this->shown_stale_overlay_ ? FLAG_STALE : 0);
   write32(reply + 16, this->rendered_frame_id_);
 }
 #endif
@@ -486,6 +527,9 @@ void GTagDisplay::process_zigbee_packet(const uint8_t *data, size_t len,
 void GTagDisplay::queue_pattern_(BootPattern pattern) {
   if (pattern == BootPattern::NONE)
     return;
+  k_mutex_lock(&this->freshness_mutex_, K_FOREVER);
+  this->freshness_.clear();
+  k_mutex_unlock(&this->freshness_mutex_);
 #ifdef USE_GTAG_ZIGBEE
   this->queued_verified_ = false;
 #endif
@@ -691,7 +735,8 @@ bool GTagDisplay::send_frame_(const uint8_t *frame) {
   }
 
   for (size_t i = 0; i < FRAME_BYTES; ++i) {
-    if (!this->word_(true, frame[i]))
+    const uint8_t value = frame[i] ^ (this->stale_overlay_ ? freshness::mask(i) : 0);
+    if (!this->word_(true, value))
       return false;
 
     if ((i & 0xFFU) == 0xFFU)
@@ -776,6 +821,17 @@ void GTagDisplay::service_lcd_() {
     }
   }
 
+  // A local expiry can request a redraw while BLE is advertising. Stop it
+  // first, then recheck the connection flag before touching LCD/frame data.
+#ifndef USE_GTAG_ZIGBEE
+  if (this->stage_ == Stage::READY && this->frame_pending_.load() && !this->connected_.load()) {
+    const int err = bt_le_adv_stop();
+    if (err != 0 && err != -EALREADY) {
+      this->set_timeout("lcd_retry", 1000, [this]() { this->enable_loop_soon_any_context(); });
+      return;
+    }
+  }
+#endif
   // HA verifies STATUS and disconnects. ONE_TIME advertising prevents the
   // stack from accepting another connection until this burst has finished.
   if (this->stage_ == Stage::READY &&
@@ -790,6 +846,7 @@ void GTagDisplay::service_lcd_() {
       ESP_LOGE(TAG, "LCD frame render failed");
       this->frame_pending_.store(true);
     } else {
+      this->shown_stale_overlay_ = this->stale_overlay_;
 #ifdef USE_GTAG_ZIGBEE
       this->rendered_verified_ = this->queued_verified_;
       this->rendered_frame_id_ = this->queued_frame_id_;
@@ -861,6 +918,7 @@ void GTagDisplay::sample_battery_() {
 #endif
 
 void GTagDisplay::setup() {
+  k_mutex_init(&this->freshness_mutex_);
 #ifndef USE_GTAG_ZIGBEE
   instance = this;
 #endif
@@ -922,6 +980,7 @@ void GTagDisplay::loop() {
 
   // If a committed frame is waiting after disconnect, render it before
   // restarting advertising. This keeps LCD SPI isolated from GATT traffic.
+  this->service_freshness_();
   this->service_lcd_();
 
 #ifndef USE_GTAG_ZIGBEE

@@ -14,7 +14,7 @@ from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_ZIGBEE
 from .display import Display
 from .render import LAYOUT_SCHEMA
 
-PLATFORMS = [Platform.SWITCH, Platform.BUTTON, Platform.IMAGE, Platform.SENSOR]
+PLATFORMS = [Platform.SWITCH, Platform.BUTTON, Platform.IMAGE, Platform.SENSOR, Platform.BINARY_SENSOR]
 DRAW_SCHEMA = LAYOUT_SCHEMA.extend({
     vol.Required("device_id"): cv.string,
     vol.Optional("force", default=False): cv.boolean,

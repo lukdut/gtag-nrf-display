@@ -5,7 +5,7 @@ substitutions:
   gtag_battery_calibration: "1.0"
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.9.0-beta.1
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.9.0-beta.2
 
 # If the external battery divider is not fitted, uncomment:
 # gtag_display:

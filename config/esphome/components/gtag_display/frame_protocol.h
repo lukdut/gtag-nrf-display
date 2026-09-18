@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "frame_codec.h"
+#include "freshness.h"
 
 namespace esphome {
 namespace gtag_display {
@@ -46,19 +47,25 @@ struct Descriptor {
   uint16_t encoded_size{RAW_FRAME_SIZE};
   uint32_t frame_id{0};
   uint32_t raw_crc32{0};
+  uint32_t freshness_timeout_s{0};
 
   bool operator==(const Descriptor &other) const {
     return version == other.version &&
            codec == other.codec &&
            encoded_size == other.encoded_size &&
            frame_id == other.frame_id &&
-           raw_crc32 == other.raw_crc32;
+           raw_crc32 == other.raw_crc32 &&
+           freshness_timeout_s == other.freshness_timeout_s;
   }
 };
 
 class Receiver {
  public:
   BeginResult begin(const Descriptor &descriptor) {
+    if (descriptor.freshness_timeout_s > freshness::MAX_TIMEOUT_S) {
+      reset_error_(Error::UNSUPPORTED_PROTOCOL);
+      return BeginResult::REJECTED;
+    }
     if (descriptor.version != PROTOCOL_VERSION) {
       reset_error_(Error::UNSUPPORTED_PROTOCOL);
       return BeginResult::REJECTED;

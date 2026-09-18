@@ -14,7 +14,9 @@ from homeassistant.setup import async_setup_component
 from custom_components.gtag_ble_test import display as display_module
 from custom_components.gtag_ble_test.const import DOMAIN
 from custom_components.gtag_ble_test.display import Display
-from custom_components.gtag_ble_test.layouts import async_render_layout, preset_layout
+from custom_components.gtag_ble_test.layouts import (
+    StaleAfterTooShort, async_render_layout, preset_layout, validate_settings,
+)
 from custom_components.gtag_ble_test.render import preview_svg
 
 
@@ -174,6 +176,95 @@ async def test_russian_options_translations_are_loaded(hass, loaded):
     values = await translation.async_get_translations(hass, "ru", "options", {DOMAIN})
     assert values[f"component.{DOMAIN}.options.step.init.title"] == "Макет экрана"
     assert "{preview}" in values[f"component.{DOMAIN}.options.step.preview.description"]
+    assert "{minimum}" in values[f"component.{DOMAIN}.options.error.stale_after_too_short"]
+
+
+@pytest.mark.parametrize(("preset", "interval", "stale_after", "minimum"), [
+    ("clock", 31, 1, 2),
+    ("single_value", 300, 9, 10),
+    ("clock_two_values", 3600, 119, 120),
+])
+async def test_short_freshness_timeout_can_be_corrected(
+    hass, loaded, sent, preset, interval, stale_after, minimum,
+):
+    result = await hass.config_entries.options.async_init(loaded.entry_id)
+    values = {"preset": preset, "update_interval": interval, "stale_after": stale_after}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], values)
+    assert result["step_id"] == "init"
+    assert result["errors"] == {"stale_after": "stale_after_too_short"}
+    assert result["description_placeholders"]["minimum"] == str(minimum)
+    assert not loaded.options and not sent
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**values, "stale_after": minimum},
+    )
+    assert result["step_id"] == ("preview" if preset == "clock" else "values")
+    assert not result["errors"]
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+
+@pytest.mark.parametrize(("interval", "stale_after"), [
+    (30, 1), (31, 2), (300, 10), (3600, 120), (3600, 0),
+])
+async def test_freshness_minimum_and_disabled_setting_apply(hass, loaded, sent, interval, stale_after):
+    result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {
+        "preset": "clock", "update_interval": interval, "stale_after": stale_after,
+    })
+    assert result["step_id"] == "preview" and not result["errors"]
+    assert not sent
+    await apply(hass, result)
+    assert loaded.options["screen"]["stale_after"] == stale_after
+    assert loaded.runtime_data._configured_interval == interval
+    assert loaded.runtime_data.freshness_timeout == stale_after * 60
+    assert loaded.runtime_data.confirmed_timeout == stale_after * 60
+
+
+async def test_increasing_interval_rechecks_freshness_timeout(hass, loaded):
+    result = await hass.config_entries.options.async_init(loaded.entry_id)
+    values = {"preset": "clock", "update_interval": 300, "stale_after": 10}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], values)
+    await apply(hass, result)
+    previous_options = dict(loaded.options)
+    result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {
+        **values, "update_interval": 301,
+    })
+    assert result["step_id"] == "init"
+    assert result["errors"] == {"stale_after": "stale_after_too_short"}
+    assert result["description_placeholders"]["minimum"] == "11"
+    assert loaded.options == previous_options
+    assert loaded.runtime_data.confirmed_timeout == 600
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+
+@pytest.mark.parametrize("matching_revision", [True, False])
+@pytest.mark.parametrize(("saved_timeout", "expected_timeout"), [(1, 10), (0, 0)])
+async def test_saved_short_timeout_loads_with_safe_minimum(
+    hass, loaded, matching_revision, saved_timeout, expected_timeout,
+):
+    await apply(hass, await preview(hass, loaded, "clock"))
+    assert await hass.config_entries.async_unload(loaded.entry_id)
+    revision = loaded.options["screen_revision"] if matching_revision else "legacy-revision"
+    hass.config_entries.async_update_entry(loaded, options={
+        "screen": {"preset": "clock", "update_interval": 300, "stale_after": saved_timeout},
+        "screen_revision": revision,
+    })
+    assert await hass.config_entries.async_setup(loaded.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert loaded.runtime_data._configured_interval == 300
+    assert loaded.runtime_data.freshness_timeout == expected_timeout * 60
+    assert loaded.runtime_data.confirmed_timeout == expected_timeout * 60
+    result = await hass.config_entries.options.async_init(loaded.entry_id)
+    defaults = result["data_schema"]({"preset": "clock", "update_interval": 300})
+    assert defaults["stale_after"] == expected_timeout
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+
+def test_direct_settings_validation_rejects_short_timeout():
+    with pytest.raises(StaleAfterTooShort) as error:
+        validate_settings({"preset": "clock", "update_interval": 300, "stale_after": 9})
+    assert error.value.minimum == 10
+    assert error.value.path == ["stale_after"]
 
 
 async def test_interval_change_wakes_waiting_queue(display, hass, sent, monkeypatch):

@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <zephyr/kernel.h>
 
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
@@ -31,6 +32,7 @@ class GTagDisplay : public Component {
   frame::BeginResult begin_frame(const frame::Descriptor &descriptor);
   bool write_frame_chunk(uint16_t offset, const uint8_t *data, size_t len);
   bool commit_frame();
+  bool renew_freshness(uint32_t id, uint32_t crc, uint32_t sequence);
   void get_status(uint8_t out[8]) const { receiver_.status(out); }
   // Millivolts, or 0xFFFF when disabled, not yet sampled, or ADC failed.
   uint16_t battery_mv() const { return battery_mv_.load(); }
@@ -73,6 +75,7 @@ class GTagDisplay : public Component {
   bool send_frame_(const uint8_t *frame);
   void wait_(Stage next, uint32_t delay_ms);
   void service_lcd_();
+  void service_freshness_();
 
 #ifdef USE_GTAG_BATTERY
   void setup_battery_();
@@ -83,6 +86,10 @@ class GTagDisplay : public Component {
   std::atomic<uint16_t> battery_mv_{0xFFFF};
 
   frame::Receiver receiver_;
+  struct k_mutex freshness_mutex_;
+  freshness::Lease freshness_;
+  bool stale_overlay_{false};
+  bool shown_stale_overlay_{false};
   // Decode separately so a rejected frame cannot corrupt a queued good frame.
   std::array<uint8_t, frame::RAW_FRAME_SIZE> decoded_frame_{};
   std::array<uint8_t, frame::RAW_FRAME_SIZE> display_frame_{};

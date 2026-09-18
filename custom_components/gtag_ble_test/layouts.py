@@ -20,14 +20,42 @@ DEFAULT_INTERVAL = 5
 SETTINGS_SCHEMA = vol.Schema({
     vol.Required("preset"): vol.In(PRESETS),
     vol.Optional("update_interval", default=DEFAULT_INTERVAL): vol.All(vol.Coerce(int), vol.Range(min=5, max=3600)),
+    vol.Optional("stale_after", default=15): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
     **{vol.Optional(f"entity_{index}"): cv.entity_id for index in (1, 2)},
     **{vol.Optional(f"label_{index}", default=""): vol.All(str, vol.Length(max=80)) for index in (1, 2)},
     **{vol.Optional(f"unit_{index}", default=""): vol.All(str, vol.Length(max=16)) for index in (1, 2)},
 })
 
 
+class StaleAfterTooShort(vol.Invalid):
+    """The freshness lease cannot cover two configured update intervals."""
+
+    def __init__(self, minimum: int) -> None:
+        self.minimum = minimum
+        super().__init__(f"stale_after must be 0 or at least {minimum} minutes", ["stale_after"])
+
+
+def validate_timing(settings: dict[str, Any]) -> None:
+    """Validate timing before entity selection; round seconds up to minutes."""
+    minimum = (2 * int(settings.get("update_interval", DEFAULT_INTERVAL)) + 59) // 60
+    stale_after = int(settings.get("stale_after", 15))
+    if 0 < stale_after < minimum:
+        raise StaleAfterTooShort(minimum)
+
+
+def normalize_saved_timing(settings: dict[str, Any]) -> dict[str, Any]:
+    """Keep previously saved configurations usable with the new timing limit."""
+    settings = dict(settings)
+    try:
+        validate_timing(settings)
+    except StaleAfterTooShort as err:
+        settings["stale_after"] = err.minimum
+    return settings
+
+
 def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings = SETTINGS_SCHEMA(settings)
+    validate_timing(settings)
     for index in range(1, value_count(settings["preset"]) + 1):
         if not settings.get(f"entity_{index}"):
             raise vol.Invalid(f"entity_{index} is required for this preset", [f"entity_{index}"])

@@ -176,9 +176,12 @@ async def connect(hass: Any, address: str, *, use_services_cache: bool = True) -
 class FrameSender:
     """One press = one frame_id, retained across retries and reconnections."""
     def __init__(self, connect_client: Callable[[], Awaitable[Any]], address: str,
-                 *, mode: str | None = None) -> None:
+                 *, mode: str | None = None, freshness_timeout: int = 0) -> None:
         self._connect = connect_client
         self._address = address
+        if not 0 <= freshness_timeout <= 86400:
+            raise ValueError("Freshness timeout must be 0..86400 seconds")
+        self._freshness_timeout = freshness_timeout
         self._mode = DATA_WRITE_MODE if mode is None else mode
         if self._mode not in ("windowed", "acknowledged"):
             raise ValueError("DATA_WRITE_MODE must be 'windowed' or 'acknowledged'")
@@ -395,6 +398,7 @@ class FrameSender:
             + desc.encoded_size.to_bytes(2, "little")
             + desc.frame_id.to_bytes(4, "little")
             + desc.raw_crc32.to_bytes(4, "little")
+            + self._freshness_timeout.to_bytes(4, "little")
         )
         last_error: BaseException | None = None
         try:
@@ -478,6 +482,20 @@ class FrameSender:
             raise HomeAssistantError(f"Frame verification/protocol error: {err}") from err
         finally:
             self.report.seconds = time.monotonic() - start
+
+async def renew_freshness(hass: Any, address: str, frame_id: int, crc: int, sequence: int) -> None:
+    """Confirm exactly one displayed frame, without retransmitting its pixels."""
+    packet = (b"\x03" + frame_id.to_bytes(4, "little") + crc.to_bytes(4, "little")
+              + sequence.to_bytes(4, "little"))
+    async with get_operation_lock(hass, address):
+        client = None
+        try:
+            async with asyncio.timeout(30):
+                client = await connect(hass, address)
+                await client.write_gatt_char(CONTROL_CHAR_UUID, packet, response=True)
+        finally:
+            await _disconnect(client)
+
 
 async def write_led(hass: Any, address: str, state: bool) -> None:
     lock = get_operation_lock(hass, address)

@@ -114,6 +114,7 @@ class ZigbeeTransport:
         self._rename_task: asyncio.Task | None = None
         self._pending: asyncio.Future | None = None
         self._request_id: str | None = None
+        self._confirming = False
         self._lock = asyncio.Lock()
 
     @property
@@ -235,14 +236,19 @@ class ZigbeeTransport:
                     self.last_read = dt_util.utc_from_timestamp(seen / 1000 if seen > 1e11 else seen)
         pending = self._pending
         if (not getattr(message, "retain", False) and pending is not None and not pending.done()
-                and state.get("frame_request_id") == self._request_id):
-            if state.get("frame_status") == "error":
+                and state.get("freshness_request_id" if self._confirming else "frame_request_id") == self._request_id):
+            if self._confirming:
+                if state.get("freshness_status") == "error":
+                    pending.set_exception(HomeAssistantError(str(state.get("freshness_error") or "Freshness confirmation failed")))
+                elif state.get("freshness_status") == "confirmed":
+                    pending.set_result(state)
+            elif state.get("frame_status") == "error":
                 pending.set_exception(HomeAssistantError(str(state.get("frame_error") or "Zigbee frame transfer failed")))
             elif state.get("frame_status") == "displayed":
                 pending.set_result(state)
         self._notify()
 
-    async def async_send(self, raw: bytes) -> dict:
+    async def async_send(self, raw: bytes, freshness_timeout: int = 0) -> dict:
         if len(raw) != 4096:
             raise ValueError("Expected 4096 framebuffer bytes")
         async with self._lock:
@@ -256,11 +262,14 @@ class ZigbeeTransport:
             try:
                 async with asyncio.timeout(TRANSFER_TIMEOUT):
                     await mqtt.async_publish(self.hass, f"{self.base_topic}/{self.address}/set", json.dumps({
-                        "frame": {"data": base64.b64encode(raw).decode("ascii"), "request_id": request_id},
+                        "frame": {"data": base64.b64encode(raw).decode("ascii"), "request_id": request_id,
+                                  "freshness_timeout": freshness_timeout},
                     }), qos=0, retain=False)
                     result = await pending
                 if str(result.get("frame_crc32", "")).lower() != crc:
                     raise HomeAssistantError("Zigbee framebuffer CRC confirmation mismatch")
+                if freshness_timeout and result.get("frame_freshness_timeout") != freshness_timeout:
+                    raise HomeAssistantError("Update the Zigbee2MQTT converter: freshness timeout was not confirmed")
                 return {
                     "transport": "zigbee", "transport_mode": "zigbee2mqtt",
                     "request_id": request_id, "frame_id": result.get("frame_id"), "raw_crc32": crc,
@@ -278,6 +287,32 @@ class ZigbeeTransport:
                     pending.exception()
                 self._pending = None
                 self._request_id = None
+
+    async def async_confirm(self, frame_id: int, crc: int, sequence: int) -> None:
+        async with self._lock:
+            if self._closed or not self.available:
+                raise HomeAssistantError("Zigbee display or MQTT is offline")
+            self._confirming = True
+            self._request_id = secrets.token_hex(16)
+            pending = self._pending = self.hass.loop.create_future()
+            try:
+                async with asyncio.timeout(30):
+                    await mqtt.async_publish(self.hass, f"{self.base_topic}/{self.address}/set", json.dumps({
+                        "frame_freshness": {"frame_id": frame_id, "crc": crc, "sequence": sequence,
+                                            "request_id": self._request_id},
+                    }), qos=0, retain=False)
+                    result = await pending
+                if (result.get("freshness_frame_id") != frame_id or result.get("freshness_sequence") != sequence
+                        or str(result.get("freshness_crc32", "")).lower() != f"{crc:08x}"):
+                    raise HomeAssistantError("Freshness confirmation does not match the displayed frame")
+            finally:
+                if not pending.done():
+                    pending.cancel()
+                elif not pending.cancelled():
+                    pending.exception()
+                self._pending = None
+                self._request_id = None
+                self._confirming = False
 
     async def async_close(self) -> None:
         self._closed = True

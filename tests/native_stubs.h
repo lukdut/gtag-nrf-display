@@ -83,6 +83,12 @@ inline Application App;
 
 inline void k_busy_wait(unsigned us) { sim::now_us += us; }
 inline uint32_t k_uptime_get_32() { return sim::now_us / 1000; }
+struct k_mutex {};
+constexpr int K_FOREVER = -1;
+inline void k_mutex_init(k_mutex *) {}
+inline void k_mutex_lock(k_mutex *, int) {}
+inline void k_mutex_unlock(k_mutex *) {}
+inline int bt_le_adv_stop() { sim::advertising = false; return 0; }
 
 struct device { unsigned port; };
 inline device gpio0{0}, gpio1{1}, adc{2};

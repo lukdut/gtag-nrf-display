@@ -12,6 +12,8 @@ nRF52840 Pro Micro / nice!nano. Home Assistant передаёт кадр чер�
 | Zigbee2MQTT | [gtag-zigbee.yaml](config/esphome/gtag-zigbee.yaml) | [nrf-gtag-zigbee.yaml](config/esphome/nrf-gtag-zigbee.yaml) |
 
 Интеграция HA находится в [custom_components/gtag_ble_test](custom_components/gtag_ble_test).
+В подготовленной версии 0.9.0-beta.2 добавлен [автономный значок устаревания](docs/freshness.md)
+для обоих транспортов с настройкой срока в HA.
 Её техническое имя сохранено для совместимости с уже добавленными устройствами
 и идентификаторами сущностей; в интерфейсе она называется **GTag Display**.
 

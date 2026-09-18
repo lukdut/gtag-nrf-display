@@ -12,10 +12,11 @@ constexpr size_t CHUNK_SIZE = 32;
 constexpr size_t MAX_PACKET_SIZE = 7 + CHUNK_SIZE;
 constexpr size_t REPLY_SIZE = 20;
 
-enum class Command : uint8_t { BEGIN = 1, DATA = 2, COMMIT = 3, STATUS = 4 };
+enum class Command : uint8_t { BEGIN = 1, DATA = 2, COMMIT = 3, STATUS = 4, FRESHNESS = 6 };
 enum class Result : uint8_t { OK = 0, BUSY = 1, INVALID = 2, SESSION = 3, RECEIVER = 4 };
 constexpr uint8_t FLAG_PENDING = 1;
 constexpr uint8_t FLAG_RENDERED = 2;
+constexpr uint8_t FLAG_STALE = 4;
 
 inline uint16_t read16(const uint8_t *p) {
   return uint16_t(p[0]) | (uint16_t(p[1]) << 8);

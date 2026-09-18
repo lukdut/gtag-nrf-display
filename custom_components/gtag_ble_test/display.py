@@ -6,7 +6,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
@@ -15,7 +15,7 @@ import voluptuous as vol
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.event import TrackTemplate, async_track_template_result, async_track_time_change
+from homeassistant.helpers.event import TrackTemplate, async_track_template_result, async_track_time_change, async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
@@ -23,9 +23,9 @@ from homeassistant.util import dt as dt_util
 from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_BLE, TRANSPORT_ZIGBEE
 from .battery import BatteryMonitor
 from .frame_protocol import PreparedFrame
-from .layouts import async_render_layout, preset_layout, validate_settings
+from .layouts import async_render_layout, normalize_saved_timing, preset_layout, validate_settings
 from .render import LAYOUT_SCHEMA, RenderedFrame, clock_layout, from_raw
-from .transport import FrameSender, connect, get_operation_lock
+from .transport import FrameSender, connect, get_operation_lock, renew_freshness
 
 _LOGGER = logging.getLogger(__name__)
 MIN_UPDATE_INTERVAL = 5.0
@@ -41,6 +41,7 @@ class DrawRequest:
     content: dict[str, Any] | bytes | None
     force: bool
     result: asyncio.Future
+    check_only: bool = False
 
 
 class Display:
@@ -72,9 +73,18 @@ class Display:
         self._last_frame: bytes | None = None
         self._last_success_time = float("-inf")
         self._last_attempt_end = float("-inf")
-        self._entry_options = entry.options
+        self._entry_options = dict(entry.options)
+        if "screen" in self._entry_options:
+            self._entry_options["screen"] = normalize_saved_timing(self._entry_options["screen"])
         self._options_revision = None
-        self._configured_interval = entry.options.get("screen", {}).get("update_interval")
+        self._configured_interval = self._entry_options.get("screen", {}).get("update_interval")
+        self.freshness_timeout = int(self._entry_options.get("screen", {}).get("stale_after", 15)) * 60
+        self.last_confirmation: datetime | None = None
+        self._confirmed_at: float | None = None
+        self.confirmed_timeout: int | None = None
+        self._freshness_sequence = 0
+        self._freshness_unsubscribe = None
+        self._last_check = float("-inf")
         self.zigbee = None
         if self.transport == TRANSPORT_ZIGBEE:
             from .zigbee import ZigbeeTransport
@@ -92,6 +102,7 @@ class Display:
         self._stop_clock()
         self._stop_watching()
         self._configured_interval = settings["update_interval"]
+        self.freshness_timeout = settings["stale_after"] * 60
         self._options_revision = revision
         self.clock_enabled = settings["preset"] == "clock"
         self.auto_update = True
@@ -170,12 +181,56 @@ class Display:
     @callback
     def async_start(self) -> None:
         self.battery.async_start()
+        if self._freshness_unsubscribe is None:
+            self._freshness_unsubscribe = async_track_time_interval(
+                self.hass, self._on_freshness_tick, timedelta(seconds=10),
+            )
         if self.clock_enabled:
             self._start_clock()
             self._enqueue("clock", None, True)
         elif self.last_layout is not None:
             self._watch_layout()
             self._enqueue("layout", deepcopy(self.last_layout), True)
+
+    @property
+    def stale(self) -> bool | None:
+        if self._confirmed_at is None:
+            return None
+        if self.confirmed_timeout == 0:
+            return False
+        return self.hass.loop.time() - self._confirmed_at >= self.confirmed_timeout
+
+    @callback
+    def _on_freshness_tick(self, _now) -> None:
+        if self._closed:
+            return
+        self._notify()
+        now = self.hass.loop.time()
+        if (not self.freshness_timeout or not self.auto_update or self._pending is not None
+                or (self._worker is not None and not self._worker.done())
+                or now - self._last_check < max(10, self.freshness_timeout / 3)):
+            return
+        if self.clock_enabled:
+            self._enqueue("clock", None, False, check_only=True)
+        elif self.last_layout is not None:
+            self._enqueue("layout", deepcopy(self.last_layout), False, check_only=True)
+
+    async def _confirm_unchanged(self) -> None:
+        started = self.hass.loop.time()
+        if (not self.freshness_timeout or self._confirmed_at is not None
+                and started - self._confirmed_at < self.freshness_timeout / 3):
+            return
+        self._freshness_sequence += 1
+        frame_id = self.report["frame_id"]
+        if self.transport == TRANSPORT_BLE:
+            frame_id = int(frame_id, 16)
+        crc = int(self.report["raw_crc32"], 16)
+        if self.zigbee is not None:
+            await self.zigbee.async_confirm(frame_id, crc, self._freshness_sequence)
+        else:
+            await renew_freshness(self.hass, self.address, frame_id, crc, self._freshness_sequence)
+        self._confirmed_at = started
+        self.last_confirmation = dt_util.utcnow()
 
     @callback
     def _stop_watching(self) -> None:
@@ -282,7 +337,7 @@ class Display:
         return await asyncio.shield(result)
 
     @callback
-    def _enqueue(self, mode: str, content, force: bool) -> asyncio.Future:
+    def _enqueue(self, mode: str, content, force: bool, *, check_only: bool = False) -> asyncio.Future:
         if self._closed:
             raise HomeAssistantError("The display integration is unloading")
         result = self.hass.loop.create_future()
@@ -293,7 +348,7 @@ class Display:
             self._resolve(self._pending, {"status": "superseded"})
         else:
             self._pending_since = self.hass.loop.time()
-        self._pending = DrawRequest(mode, content, force, result)
+        self._pending = DrawRequest(mode, content, force, result, check_only)
         self._queue_changed.set()
         if self.status != "sending":
             self.status = "queued"
@@ -324,7 +379,8 @@ class Display:
             while self._pending is not None and not self._closed:
                 now = self.hass.loop.time()
                 delay = max(0, self._pending_since + COALESCE_SECONDS - now,
-                            self._last_attempt_end + self.update_interval - now)
+                            self._last_attempt_end + (MIN_UPDATE_INTERVAL if self._pending.check_only
+                                                      else self.update_interval) - now)
                 self._queue_changed.clear()
                 if delay > 0:
                     try:
@@ -339,22 +395,33 @@ class Display:
                 if request is None:
                     continue
                 attempted = False
+                self._last_check = self.hass.loop.time()
                 try:
                     frame = await self._render(request)
                     if (not request.force and frame.raw == self._last_frame
-                            and self.hass.loop.time() - self._last_success_time < UNCHANGED_MAX_AGE):
+                            and (self.freshness_timeout or
+                                 self.hass.loop.time() - self._last_success_time < UNCHANGED_MAX_AGE)):
+                        await self._confirm_unchanged()
+                        self.last_error = None
                         self.status = "unchanged"
                         self._resolve(request, {"status": "unchanged"})
                         continue
+                    if request.check_only and self.hass.loop.time() < self._last_attempt_end + self.update_interval:
+                        self.status = "sent" if self.last_success else "idle"
+                        self._resolve(request, {"status": "deferred"})
+                        continue
                     attempted = True
+                    confirmation_start = self.hass.loop.time()
+                    sent_timeout = self.freshness_timeout
                     self.status = "sending"
                     self._notify()
                     if self.zigbee is not None:
-                        report_attributes = await self.zigbee.async_send(frame.raw)
+                        report_attributes = await self.zigbee.async_send(frame.raw, sent_timeout)
                     else:
                         prepared = await self.hass.async_add_executor_job(PreparedFrame.prepare, frame.raw)
                         async with get_operation_lock(self.hass, self.address):
-                            sender = FrameSender(lambda: connect(self.hass, self.address), self.address)
+                            sender = FrameSender(lambda: connect(self.hass, self.address), self.address,
+                                                 freshness_timeout=sent_timeout)
                             report = await sender.send_prepared(prepared)
                         report_attributes = {"transport": TRANSPORT_BLE, **report.attributes()}
                     # Update preview only after the transport confirms this frame.
@@ -362,6 +429,10 @@ class Display:
                     self._last_frame = frame.raw
                     self.last_success = dt_util.utcnow()
                     self._last_success_time = self.hass.loop.time()
+                    self._confirmed_at = confirmation_start
+                    self.confirmed_timeout = sent_timeout
+                    self.last_confirmation = self.last_success
+                    self._freshness_sequence = 0
                     self.report = report_attributes
                     self.last_error = None
                     self.status = "sent"
@@ -386,6 +457,9 @@ class Display:
 
     async def async_close(self) -> None:
         self._closed = True
+        if self._freshness_unsubscribe is not None:
+            self._freshness_unsubscribe()
+            self._freshness_unsubscribe = None
         await self.battery.async_close()
         self._stop_watching()
         self._stop_clock()

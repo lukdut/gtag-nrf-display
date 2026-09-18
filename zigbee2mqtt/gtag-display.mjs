@@ -69,6 +69,7 @@ export function parseReply(payload, command) {
         result: data[2], session: data.readUInt32LE(3), state: data[7],
         received: data.readUInt16LE(8), crc: data.readUInt32LE(10), error: data[14],
         pending: !!(data[15] & 1), rendered: !!(data[15] & 2), renderedId: data.readUInt32LE(16),
+        stale: !!(data[15] & 4),
     };
 }
 
@@ -76,6 +77,9 @@ class SessionLost extends Error {}
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function transferFrame(endpoint, raw, options = {}) {
+    const freshnessTimeout = options.freshnessTimeout ?? 0;
+    if (!Number.isInteger(freshnessTimeout) || freshnessTimeout < 0 || freshnessTimeout > 86400)
+        throw new Error('freshness_timeout must be an integer between 0 and 86400 seconds');
     const encoded = encodeFrame(raw);
     const session = options.session ?? randomBytes(4).readUInt32LE(0);
     const sleep = options.sleep ?? pause;
@@ -125,11 +129,12 @@ export async function transferFrame(endpoint, raw, options = {}) {
     };
     for (let restart = 0; restart < 2; restart++) {
         try {
-            const begin = Buffer.alloc(13);
+            const begin = Buffer.alloc(17);
             begin[0] = 1; begin[1] = 1; begin[2] = encoded.codec;
             begin.writeUInt16LE(encoded.payload.length, 3);
             begin.writeUInt32LE(session, 5);
             begin.writeUInt32LE(encoded.crc, 9);
+            begin.writeUInt32LE(freshnessTimeout, 13);
             let status = check(await rpc(begin));
             for (let offset = status.received; offset < encoded.payload.length;) {
                 const chunk = encoded.payload.subarray(offset, offset + 32);
@@ -147,7 +152,7 @@ export async function transferFrame(endpoint, raw, options = {}) {
             // COMPLETE means decoded/verified. Wait separately for the LCD write.
             for (let poll = 0; poll <= 30; poll++) {
                 if (status.rendered && status.renderedId === session && !status.pending) {
-                    return {session, crc: encoded.crc, bytes: encoded.payload.length, retries,
+                    return {session, crc: encoded.crc, bytes: encoded.payload.length, retries, freshnessTimeout,
                         milliseconds: Date.now() - started};
                 }
                 if (poll === 30) break;
@@ -200,6 +205,62 @@ export function testImage(inverted = false) {
 }
 
 const inFlight = new Set();
+
+export async function confirmFreshness(endpoint, value) {
+    for (const name of ['frame_id', 'crc', 'sequence']) {
+        if (!Number.isInteger(value[name]) || value[name] < (name === 'sequence' ? 1 : 0) || value[name] > 0xffffffff)
+            throw new Error(`Invalid freshness ${name}`);
+    }
+    const packet = Buffer.alloc(13);
+    packet[0] = 6;
+    packet.writeUInt32LE(value.frame_id, 1);
+    packet.writeUInt32LE(value.crc, 5);
+    packet.writeUInt32LE(value.sequence, 9);
+    const result = await endpoint.command('gtagFrame', 'packet', {payload: packet},
+        {disableDefaultResponse: true, timeout: 8000, sendPolicy: 'immediate'});
+    const status = parseReply(result?.payload, 6);
+    if (status.result !== 0 || status.session !== value.frame_id || status.crc !== value.crc ||
+        status.state !== 2 || !status.rendered || status.renderedId !== value.frame_id)
+        throw new Error('Freshness confirmation rejected: the device needs a complete frame');
+}
+
+export const freshnessConverter = {
+    key: ['frame_freshness', 'frame_stale'],
+    convertGet: async (entity, key, meta) => {
+        const endpoint = meta.device?.endpoints.find((ep) => ep.supportsInputCluster(frameCluster.ID));
+        if (!endpoint) throw new Error('GTag frame endpoint missing');
+        const result = await endpoint.command('gtagFrame', 'packet', {payload: Buffer.from([4, 0, 0, 0, 0])},
+            {disableDefaultResponse: true, timeout: 8000, sendPolicy: 'immediate'});
+        parseReply(result?.payload, 4);
+    },
+    convertSet: async (entity, key, value, meta) => {
+        if (!value || typeof value !== 'object' || typeof value.request_id !== 'string' ||
+            !/^[a-zA-Z0-9_-]{1,64}$/.test(value.request_id))
+            throw new Error('frame_freshness requires frame_id, crc, sequence and request_id');
+        const device = meta.device;
+        const endpoint = device?.endpoints.find((ep) => ep.supportsInputCluster(frameCluster.ID));
+        if (!endpoint || !device.ieeeAddr) throw new Error('GTag frame endpoint missing');
+        const publish = (status, error = '') => meta.publish({
+            freshness_request_id: value.request_id, freshness_status: status, freshness_error: error,
+            freshness_frame_id: value.frame_id, freshness_crc32: value.crc?.toString(16).padStart(8, '0'),
+            freshness_sequence: value.sequence,
+        });
+        if (inFlight.has(device.ieeeAddr)) {
+            publish('error', 'A frame operation is already in progress');
+            throw new Error('A frame operation is already in progress');
+        }
+        inFlight.add(device.ieeeAddr);
+        try {
+            await confirmFreshness(endpoint, value);
+            publish('confirmed');
+        } catch (error) {
+            publish('error', error.message);
+            throw error;
+        } finally {
+            inFlight.delete(device.ieeeAddr);
+        }
+    },
+};
 export function parsePowerDiagnostics(payload) {
     const data = Buffer.from(payload ?? []);
     if (data.length !== 40 || data[0] !== 1 || data[1] !== 5 || data[2] !== 0 || (data[3] & ~3))
@@ -249,7 +310,7 @@ export const frameConverter = {
         inFlight.add(device.ieeeAddr);
         try {
             meta.publish({frame_status: 'sending', frame_error: '', frame_request_id: requestId});
-            const result = await transferFrame(endpoint, raw);
+            const result = await transferFrame(endpoint, raw, {freshnessTimeout: envelope ? value.freshness_timeout : 0});
             // This is a device-confirmed result. Publish even when the user
             // disables Zigbee2MQTT's optimistic state updates.
             meta.publish({
@@ -258,6 +319,7 @@ export const frameConverter = {
                 frame_crc32: result.crc.toString(16).padStart(8, '0'),
                 frame_bytes: result.bytes, frame_transfer_ms: result.milliseconds,
                 frame_retries: result.retries,
+                frame_freshness_timeout: result.freshnessTimeout,
             });
         } catch (error) {
             meta.publish({frame_status: 'error', frame_error: error.message, frame_request_id: requestId});
@@ -287,10 +349,14 @@ export default {
     ],
     fromZigbee: [{cluster: 'gtagFrame', type: ['commandReply'], convert: (model, msg) => {
         const data = Buffer.from(msg.data?.payload ?? []);
+        if (data.length === 20 && data[0] === 1 && data[1] === 4 && data[2] === 0) {
+            const reply = parseReply(data, 4);
+            return {frame_stale: reply.stale, frame_stale_frame_id: reply.renderedId};
+        }
         if (data.length !== 40 || data[0] !== 1 || data[1] !== 5 || data[2] !== 0 || (data[3] & ~3)) return {};
         return {power_diagnostics: JSON.stringify(parsePowerDiagnostics(data))};
     }}],
-    toZigbee: [frameConverter, powerConverter],
+    toZigbee: [frameConverter, powerConverter, freshnessConverter],
     exposes: [
         e.enum('test_image', ea.SET, ['zigbee', 'inverted']).withDescription('Send a complete demo image through the frame protocol'),
         e.text('frame', ea.SET).withDescription('4096-byte framebuffer as base64, or MQTT object {data, request_id}: 256x128, row-lsb, 1=white'),
@@ -302,6 +368,17 @@ export default {
         e.numeric('frame_bytes', ea.STATE).withUnit('B'),
         e.numeric('frame_transfer_ms', ea.STATE).withUnit('ms'),
         e.numeric('frame_retries', ea.STATE),
+        e.numeric('frame_freshness_timeout', ea.STATE).withUnit('s').withCategory('diagnostic'),
+        e.text('frame_freshness', ea.SET).withDescription('Confirm the current frame: {frame_id, crc, sequence, request_id}'),
+        e.binary('frame_stale', ea.STATE_GET, true, false).withCategory('diagnostic')
+            .withDescription('The physical LCD currently shows the stale-data icon; read on demand'),
+        e.numeric('frame_stale_frame_id', ea.STATE).withCategory('diagnostic'),
+        e.text('freshness_request_id', ea.STATE).withCategory('diagnostic'),
+        e.text('freshness_status', ea.STATE).withCategory('diagnostic'),
+        e.text('freshness_error', ea.STATE).withCategory('diagnostic'),
+        e.numeric('freshness_frame_id', ea.STATE).withCategory('diagnostic'),
+        e.text('freshness_crc32', ea.STATE).withCategory('diagnostic'),
+        e.numeric('freshness_sequence', ea.STATE).withCategory('diagnostic'),
         e.text('power_diagnostics', ea.STATE_GET).withCategory('diagnostic')
             .withDescription('Explicit power-debug snapshot; requires zigbee_power_diagnostics firmware option'),
     ],

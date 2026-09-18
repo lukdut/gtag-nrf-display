@@ -15,7 +15,7 @@ const runtime = await mkdtemp(new URL('./.runtime-', import.meta.url));
 await copyFile(`${root}/zigbee2mqtt/gtag-display.mjs`, `${runtime}/converter.mjs`);
 const converter = await import(pathToFileURL(`${runtime}/converter.mjs`));
 const {frameCluster, encodeFrame, crc32, decodeFrameInput, transferFrame, testImage, frameConverter,
-    powerConverter, parsePowerDiagnostics} = converter;
+    powerConverter, parsePowerDiagnostics, confirmFreshness, freshnessConverter, parseReply} = converter;
 const child = spawn(process.env.PYTHON || 'python3', ['tests/zigbee/native_bridge.py'],
     {cwd: root, stdio: ['pipe', 'pipe', 'inherit']});
 const lines = createInterface({input: child.stdout})[Symbol.asyncIterator]();
@@ -69,6 +69,40 @@ const verify = async (raw, frames = 1) => {
 };
 try {
     assert.equal((await lines.next()).value, 'ready');
+    await test('expiry inverts pixels, short confirmation restores them, replay cannot renew', async () => {
+        const ep = endpoint();
+        const raw = testImage();
+        const result = await transferFrame(ep, raw, {session: 99, freshnessTimeout: 60, sleep: noSleep});
+        assert.equal(result.freshnessTimeout, 60);
+        await verify(raw);
+        await request('advance', {ms: 60_000});
+        const stale = await request('inspect');
+        assert.notEqual(stale.raw, raw.toString('hex'));
+        assert.equal(stale.frames, 2);
+        const query = Buffer.alloc(5); query[0] = 4;
+        assert.equal(parseReply((await ep.command('gtagFrame', 'packet', {payload: query},
+            {disableDefaultResponse: true, timeout: 8000, sendPolicy: 'immediate'})).payload, 4).stale, true);
+        const message = {frame_id: 99, crc: crc32(raw), sequence: 1};
+        await assert.rejects(confirmFreshness(ep, {...message, frame_id: 100}));
+        await confirmFreshness(ep, message);
+        await verify(raw, 3);
+        await request('advance', {ms: 30_000});
+        await confirmFreshness(ep, message); // Duplicate cannot restart the timer.
+        await request('advance', {ms: 31_000});
+        assert.equal((await request('inspect')).frames, 4);
+        const states = [];
+        const meta = {device: {ieeeAddr: '0x1234', endpoints: [ep]}, publish: (v) => states.push(v)};
+        await freshnessConverter.convertSet(null, 'frame_freshness',
+            {...message, sequence: 2, request_id: 'fresh-2'}, meta);
+        assert.equal(states.at(-1).freshness_status, 'confirmed');
+        assert.equal(states.at(-1).freshness_request_id, 'fresh-2');
+        await verify(raw, 5);
+        await assert.rejects(freshnessConverter.convertSet(null, 'frame_freshness',
+            {...message, sequence: 1, request_id: 'old'}, meta));
+        assert.equal(states.at(-1).freshness_status, 'error');
+        await request('reset');
+        await assert.rejects(confirmFreshness(ep, {...message, sequence: 3}));
+    });
     await test('definition loads with pinned Zigbee2MQTT converter dependencies', async () => {
         const definition = prepareDefinition(converter.default);
         assert.ok(definition.toZigbee.includes(frameConverter));

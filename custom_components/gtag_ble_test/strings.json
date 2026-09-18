@@ -53,10 +53,12 @@
         "description": "Choose a layout. You can preview it before applying.",
         "data": {
           "preset": "Layout",
-          "update_interval": "Minimum update interval"
+          "update_interval": "Minimum update interval",
+          "stale_after": "Show stale-data icon after"
         },
         "data_description": {
-          "update_interval": "Minimum pause between transfers, in seconds. Values update when their entities change; the clock updates once a minute. A longer pause reduces update frequency."
+          "update_interval": "Minimum pause between transfers, in seconds. Values update when their entities change; the clock updates once a minute. A longer pause reduces update frequency.",
+          "stale_after": "Minutes without confirmation from HA; at least twice the update interval, rounded up to whole minutes. 0 disables the check. The icon inverts pixels in the upper-right corner. Requires updated firmware and Zigbee converter."
         }
       },
       "values": {
@@ -87,6 +89,7 @@
     },
     "error": {
       "invalid_settings": "Check the value and its allowed length or range.",
+      "stale_after_too_short": "Enter at least {minimum} minutes to cover two update intervals, or 0 to disable the check.",
       "entity_not_found": "Choose an existing entity.",
       "invalid_entity": "Display diagnostics cannot be used as a source for the screen.",
       "render_failed": "Unable to draw the preview. Edit the settings or check the Home Assistant log."
@@ -105,6 +108,13 @@
         "apply": "Apply",
         "edit": "Edit",
         "refresh": "Refresh preview"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "display_stale": {
+        "name": "Display data stale"
       }
     }
   }

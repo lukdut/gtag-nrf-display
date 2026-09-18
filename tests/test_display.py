@@ -109,6 +109,7 @@ def setUpModule():
     fw.firmware_calibration.argtypes = [ctypes.c_float]
     for variant in (fw, fw_without_battery):
         variant.firmware_battery.argtypes = [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16]
+        variant.firmware_set_time.argtypes = [ctypes.c_uint32]
     for name in ("control", "data", "led"):
         getattr(fw, f"firmware_{name}").argtypes = [ctypes.c_char_p, ctypes.c_uint16]
     fw.firmware_status.argtypes = [ctypes.c_void_p]
@@ -135,10 +136,11 @@ def words():
     return [fw.firmware_word(i) for i in range(fw.firmware_words())]
 
 
-def begin(raw, frame_id=1, bad_crc=False):
+def begin(raw, frame_id=1, bad_crc=False, timeout=0):
     encoded = codec.encode_best(raw)
     packet = struct.pack("<BBB HII", 1, 1, encoded.codec, len(encoded.payload),
                          frame_id, encoded.raw_crc32 ^ int(bad_crc))
+    packet += struct.pack('<I', timeout)
     assert fw.firmware_control(packet, len(packet)) == len(packet)
     for offset in range(0, len(encoded.payload), 18):
         data = struct.pack("<H", offset) + encoded.payload[offset:offset + 18]
@@ -153,6 +155,91 @@ def commit():
 class DisplayTests(unittest.TestCase):
     def setUp(self):
         start()
+
+    def test_freshness_icon_inverts_only_glyph_and_restores_exact_frame(self):
+        for fill in (0x00, 0xff, 0x55):
+            with self.subTest(fill=fill):
+                start()
+                raw = bytes([fill]) * 4096
+                fw.firmware_connect()
+                begin(raw, timeout=60)
+                commit()
+                fw.firmware_disconnect()
+                fw.firmware_run(0)
+                self.assertEqual(bytes(v & 255 for v in words()[-4096:]), raw)
+                before = fw.firmware_frames()
+                fw.firmware_run(60_000)
+                overlay = bytes(v & 255 for v in words()[-4096:])
+                changed = [i for i, (a, b) in enumerate(zip(raw, overlay)) if a != b]
+                self.assertTrue(changed)
+                self.assertTrue(all(i // 32 < 24 and i % 32 >= 29 for i in changed))
+                self.assertEqual(status().crc, zlib.crc32(raw))
+                self.assertEqual(fw.firmware_frames(), before + 1)
+                fw.firmware_run(60_000)
+                self.assertEqual(fw.firmware_frames(), before + 1, 'No repeated expiry redraws')
+                fw.firmware_connect()
+                packet = struct.pack('<BIII', 3, 1, zlib.crc32(raw), 1)
+                self.assertEqual(fw.firmware_control(packet, len(packet)), len(packet))
+                fw.firmware_disconnect()
+                fw.firmware_run(0)
+                self.assertEqual(bytes(v & 255 for v in words()[-4096:]), raw)
+
+    def test_freshness_retries_wrong_sessions_and_disabled_timeout(self):
+        raw = b'\xff' * 4096
+        fw.firmware_connect()
+        begin(raw, timeout=60)
+        commit()
+        fw.firmware_disconnect()
+        fw.firmware_run(30_000)
+        fw.firmware_connect()
+        for frame_id, crc, seq in ((2, zlib.crc32(raw), 1), (1, 1234, 1), (1, zlib.crc32(raw), 0)):
+            packet = struct.pack('<BIII', 3, frame_id, crc, seq)
+            self.assertLess(fw.firmware_control(packet, len(packet)), 0)
+        packet = struct.pack('<BIII', 3, 1, zlib.crc32(raw), 2)
+        self.assertEqual(fw.firmware_control(packet, len(packet)), len(packet))
+        fw.firmware_disconnect()
+        fw.firmware_run(30_000)
+        fw.firmware_connect()
+        self.assertEqual(fw.firmware_control(packet, len(packet)), len(packet))
+        old = struct.pack('<BIII', 3, 1, zlib.crc32(raw), 1)
+        self.assertLess(fw.firmware_control(old, len(old)), 0)
+        commit()  # Duplicate COMMIT also cannot extend the deadline.
+        fw.firmware_disconnect()
+        fw.firmware_run(31_000)
+        self.assertNotEqual(bytes(v & 255 for v in words()[-4096:]), raw)
+        fw.firmware_connect()
+        begin(raw, frame_id=2, timeout=0)
+        commit()
+        fw.firmware_disconnect()
+        fw.firmware_run(300_000)
+        self.assertEqual(bytes(v & 255 for v in words()[-4096:]), raw)
+
+    def test_expired_icon_stays_after_an_entire_uptime_wrap(self):
+        raw = b'\xff' * 4096
+        fw.firmware_connect()
+        begin(raw, timeout=60)
+        commit()
+        fw.firmware_disconnect()
+        fw.firmware_run(60_000)
+        expired = bytes(v & 255 for v in words()[-4096:])
+        self.assertNotEqual(expired, raw)
+        fw.firmware_clock_wrap(31_000)  # Uptime now looks younger than the lease.
+        fw.firmware_connect()
+        fw.firmware_disconnect()
+        fw.firmware_run(0)
+        self.assertEqual(bytes(v & 255 for v in words()[-4096:]), expired)
+
+    def test_freshness_deadline_crosses_uptime_wrap(self):
+        raw = b'\xff' * 4096
+        fw.firmware_set_time(0xfffff000)
+        fw.firmware_connect()
+        begin(raw, timeout=60)
+        commit()
+        fw.firmware_disconnect()
+        fw.firmware_run(30_000)
+        self.assertEqual(bytes(v & 255 for v in words()[-4096:]), raw)
+        fw.firmware_run(31_000)
+        self.assertNotEqual(bytes(v & 255 for v in words()[-4096:]), raw)
 
     def test_battery_cache_sampling_errors_and_recovery(self):
         fw.firmware_create(0, 1000)

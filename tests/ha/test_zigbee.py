@@ -66,6 +66,7 @@ def broker(monkeypatch):
             envelope = data["frame"]
             raw = base64.b64decode(envelope["data"])
             state = {"frame_status": "displayed", "frame_request_id": envelope["request_id"],
+                     "frame_freshness_timeout": envelope.get("freshness_timeout", 0),
                      "frame_crc32": f"{zlib.crc32(raw):08x}", "frame_id": 42,
                      "frame_bytes": 128, "frame_retries": 0, "frame_transfer_ms": 2000}
             state.update(changes)
@@ -122,6 +123,36 @@ async def test_only_matching_live_lcd_ack_confirms_frame(transport, broker):
     report = await task
     assert report["receiver_status"] == "displayed" and report["transport"] == "zigbee"
     assert transport._pending is None
+
+
+async def test_freshness_confirmation_rejects_retained_wrong_request_and_wrong_frame(transport, broker):
+    task = asyncio.create_task(transport.async_confirm(42, 1234, 3))
+    await asyncio.sleep(0)
+    envelope = broker.messages[-1][1]["frame_freshness"]
+    state = {"freshness_request_id": envelope["request_id"], "freshness_status": "confirmed",
+             "freshness_frame_id": 42, "freshness_crc32": f"{1234:08x}", "freshness_sequence": 3}
+    broker.receive("zigbee2mqtt/room/display", state, retain=True)
+    broker.receive("zigbee2mqtt/room/display", {**state, "freshness_request_id": "another"})
+    await asyncio.sleep(0)
+    assert not task.done()
+    broker.receive("zigbee2mqtt/room/display", {**state, "freshness_sequence": 2})
+    with pytest.raises(HomeAssistantError, match="does not match"):
+        await task
+    assert transport._pending is None and not transport._confirming
+    task = asyncio.create_task(transport.async_confirm(42, 1234, 4))
+    await asyncio.sleep(0)
+    envelope = broker.messages[-1][1]["frame_freshness"]
+    broker.receive("zigbee2mqtt/room/display", {**state, "freshness_sequence": 4,
+                                               "freshness_request_id": envelope["request_id"]})
+    await task
+
+
+async def test_old_converter_cannot_silently_ignore_freshness(transport, broker):
+    task = asyncio.create_task(transport.async_send(bytes(4096), 900))
+    await asyncio.sleep(0)
+    broker.confirm(broker.messages[-1][1], frame_freshness_timeout=None)
+    with pytest.raises(HomeAssistantError, match="Update the Zigbee2MQTT converter"):
+        await task
 
 
 @pytest.mark.parametrize("failure", ["crc", "radio", "mqtt", "bridge", "device", "timeout"])

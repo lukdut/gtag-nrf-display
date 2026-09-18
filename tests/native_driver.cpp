@@ -53,6 +53,8 @@ void firmware_create(unsigned pattern, unsigned interval) {
   display->setup();
 }
 void firmware_run(unsigned ms) { run_until(sim::now_us + uint64_t(ms) * 1000); }
+void firmware_set_time(unsigned ms) { sim::now_us = uint64_t(ms) * 1000; }
+void firmware_clock_wrap(unsigned subtract_ms) { sim::now_us += ((uint64_t(1) << 32) - subtract_ms) * 1000; }
 #ifndef USE_GTAG_ZIGBEE
 void firmware_connect() {
   assert(sim::advertising);

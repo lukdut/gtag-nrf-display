@@ -19,7 +19,11 @@ from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_TRANSPORT, DOMAIN, SERVICE_UUID, TRANSPORT_BLE, TRANSPORT_ZIGBEE
-from .layouts import DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, async_render_layout, preset_layout, validate_settings, value_count
+from .layouts import (
+    DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, StaleAfterTooShort,
+    async_render_layout, normalize_saved_timing, preset_layout,
+    validate_settings, validate_timing, value_count,
+)
 from .render import clock_layout, preview_svg
 
 _LOGGER = logging.getLogger(__name__)
@@ -176,10 +180,10 @@ class GTagOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if self._settings is None:
-            self._settings = {
-                "preset": DEFAULT_PRESET, "update_interval": DEFAULT_INTERVAL,
+            self._settings = normalize_saved_timing({
+                "preset": DEFAULT_PRESET, "update_interval": DEFAULT_INTERVAL, "stale_after": 15,
                 **self.config_entry.options.get("screen", {}),
-            }
+            })
         schema = vol.Schema({
             vol.Required("preset", default=self._settings["preset"]): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=list(PRESETS), translation_key="preset",
@@ -189,19 +193,32 @@ class GTagOptionsFlow(OptionsFlow):
                 selector.NumberSelectorConfig(min=5, max=3600, step=1,
                                               mode=selector.NumberSelectorMode.BOX, unit_of_measurement="s"),
             ),
+            vol.Optional("stale_after", default=self._settings["stale_after"]): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1440, step=1,
+                                              mode=selector.NumberSelectorMode.BOX, unit_of_measurement="min"),
+            ),
         })
         errors = {}
+        placeholders = {}
         if user_input is not None:
             try:
                 self._settings.update(schema(user_input))
                 self._settings["update_interval"] = int(self._settings["update_interval"])
+                self._settings["stale_after"] = int(self._settings["stale_after"])
+                validate_timing(self._settings)
+            except StaleAfterTooShort as err:
+                errors["stale_after"] = "stale_after_too_short"
+                placeholders["minimum"] = str(err.minimum)
             except vol.Invalid:
                 errors["base"] = "invalid_settings"
             else:
                 if value_count(self._settings["preset"]):
                     return await self.async_step_values()
                 return await self.async_step_preview()
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors, last_step=False)
+        return self.async_show_form(
+            step_id="init", data_schema=self.add_suggested_values_to_schema(schema, self._settings),
+            errors=errors, description_placeholders=placeholders, last_step=False,
+        )
 
     async def async_step_values(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         registry = er.async_get(self.hass)
