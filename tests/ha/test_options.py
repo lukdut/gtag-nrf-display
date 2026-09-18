@@ -392,3 +392,36 @@ async def test_continuous_updates_do_not_postpone_sending_forever(display, sent,
             await producer
         await asyncio.gather(*requests)
     assert sent
+
+
+@pytest.mark.parametrize("custom", [False, True])
+async def test_saved_old_header_moves_once_without_changing_custom_layout(hass, loaded, sent, custom):
+    from copy import deepcopy
+    from custom_components.gtag_ble_test.render import LAYOUT_SCHEMA
+
+    await apply(hass, await preview(hass, loaded))
+    display = loaded.runtime_data
+    current = LAYOUT_SCHEMA(preset_layout(loaded.options["screen"]))
+    old = deepcopy(current)
+    old["elements"][0]["y"] = 8
+    old["elements"][1]["y"] = 18
+    if custom:
+        old["elements"][4]["text"] = "Пользовательский заголовок"
+    revision = loaded.options["screen_revision"]
+    assert await hass.config_entries.async_unload(loaded.entry_id)
+    await display._store.async_save({
+        "clock_enabled": False, "layout": old, "auto_update": False,
+        "options_revision": revision,
+    })
+    assert await hass.config_entries.async_setup(loaded.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    expected = old if custom else current
+    assert loaded.runtime_data.last_layout == expected
+    assert loaded.runtime_data.auto_update is False
+    assert loaded.runtime_data._options_revision == revision
+    assert (await loaded.runtime_data._store.async_load())["layout"] == expected
+    assert sent[-1] == (await async_render_layout(hass, expected)).raw
+    # A second restart must not move it down another five pixels.
+    assert await hass.config_entries.async_reload(loaded.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert loaded.runtime_data.last_layout == expected

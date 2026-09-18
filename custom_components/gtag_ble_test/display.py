@@ -23,7 +23,7 @@ from homeassistant.util import dt as dt_util
 from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_BLE, TRANSPORT_ZIGBEE
 from .battery import BatteryMonitor
 from .frame_protocol import PreparedFrame
-from .layouts import async_render_layout, normalize_saved_timing, preset_layout, validate_settings
+from .layouts import async_render_layout, normalize_saved_timing, preset_layout, upgrade_saved_preset, validate_settings
 from .render import LAYOUT_SCHEMA, RenderedFrame, clock_layout, from_raw
 from .transport import FrameSender, connect, get_operation_lock, renew_freshness
 
@@ -149,6 +149,11 @@ class Display:
         ):
             self._select_settings(settings, revision)
             await self._save()
+        elif settings and self.last_layout is not None and not self.clock_enabled:
+            updated = upgrade_saved_preset(self.last_layout, settings)
+            if updated != self.last_layout:
+                self.last_layout = updated
+                await self._save()
 
     def _validate_layout(self, layout: dict[str, Any]) -> dict[str, Any]:
         layout = LAYOUT_SCHEMA(layout)

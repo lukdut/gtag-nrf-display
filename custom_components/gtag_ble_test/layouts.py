@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.template import Template
 
-from .render import RenderedFrame, render_layout
+from .render import LAYOUT_SCHEMA, RenderedFrame, render_layout
 
 PRESETS = ("clock", "single_value", "clock_two_values")
 DEFAULT_PRESET = "clock_two_values"
@@ -133,6 +133,19 @@ def preset_layout(settings: dict[str, Any]) -> dict[str, Any]:
         # The existing dedicated clock renderer is used for this mode.
         raise ValueError("Use clock_layout for the clock preset")
     return {"elements": elements}
+
+
+def upgrade_saved_preset(layout: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    """Move the old standard clock header; preserve all custom draw layouts."""
+    if settings.get("preset") != "clock_two_values":
+        return layout
+    current = LAYOUT_SCHEMA(preset_layout(settings))
+    previous = deepcopy(current)
+    previous["elements"][0]["y"] = 8
+    previous["elements"][1]["y"] = 18
+    # Compare the entire normalized layout, including templates and styles.
+    # Matching just the two header coordinates would also change custom pages.
+    return current if LAYOUT_SCHEMA(layout) == previous else layout
 
 
 async def async_render_layout(hass: HomeAssistant, layout: dict[str, Any]) -> RenderedFrame:
