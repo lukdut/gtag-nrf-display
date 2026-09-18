@@ -8,7 +8,7 @@ cd "$(dirname "$0")/../.."
 export ESPHOME_IMAGE ARTIFACT_DIR
 mkdir -p "$ARTIFACT_DIR"
 work=$(mktemp -d /tmp/gtag-build-XXXXXX)
-mkdir "$work/config" "$work/sdk"
+mkdir "$work/config"
 cp "$WIZARD_YAML" "$work/config/gtag-container-check.yaml"
 cp "$WIZARD_YAML" "$ARTIFACT_DIR/gtag-container-check.yaml"
 docker pull "$ESPHOME_IMAGE"
@@ -21,18 +21,18 @@ assert info['Architecture'] == host, (info['Architecture'], host)
 assert os.environ.get('EXPECTED_ARCH', host) == host
 print(f'Native ESPHome: linux/{host}; empty SDK and build directories')
 PY
-docker run --rm -v "$work/config:/config" -v "$work/sdk:/sdk" \
-  -e ESPHOME_SDK_NRF_PREFIX=/sdk "$ESPHOME_IMAGE" \
+docker run --rm -v "$work/config:/config" "$ESPHOME_IMAGE" \
   compile /config/gtag-container-check.yaml 2>&1 | tee "$ARTIFACT_DIR/build.log"
-docker run --rm --entrypoint python3 -v "$work/sdk:/sdk:ro" "$ESPHOME_IMAGE" -c '
-import json, platform, struct, subprocess
+docker run --rm --entrypoint python3 -v "$work/config:/config:ro" "$ESPHOME_IMAGE" -c '
+import json, platform, re, struct, subprocess
 from pathlib import Path
-compiler, = Path("/sdk").glob("**/bin/arm-zephyr-eabi-gcc")
+cache = Path("/config/.esphome/build/gtag-container-check/.pioenvs/gtag-container-check/zephyr/CMakeCache.txt")
+compiler = Path(re.search(r"^CMAKE_C_COMPILER:(?:FILEPATH|STRING)=(.+)$", cache.read_text(), re.M)[1])
 header = compiler.read_bytes()[:20]
 assert header[:4] == b"\x7fELF"
 machine = struct.unpack_from("<H", header, 18)[0]
 assert machine == {"x86_64": 62, "aarch64": 183}[platform.machine()], machine
-print(json.dumps({"compiler_host": platform.machine(), "elf_machine": machine,
+print(json.dumps({"compiler": str(compiler), "compiler_host": platform.machine(), "elf_machine": machine,
     "compiler_version": subprocess.check_output([str(compiler), "--version"], text=True)}, indent=2))
 ' > "$ARTIFACT_DIR/compiler.json"
 python3 tests/container/record_build.py "$work/config"

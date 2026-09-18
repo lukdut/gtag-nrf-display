@@ -20,7 +20,9 @@ validate_uf2(uf2, app_start=0x26000)
 shutil.copyfile(uf2, output / "gtag-promicro-zigbee.uf2")
 document = yaml.safe_load((config / "gtag-container-check.yaml").read_text())
 revisions = []
-for git_dir in sorted(config.glob(".esphome/**/.git")):
+public_repos = [git_dir for kind in ("packages", "external_components")
+                for git_dir in config.glob(f".esphome/{kind}/**/.git")]
+for git_dir in sorted(public_repos):
     revisions.append({"path": str(git_dir.parent.relative_to(config)), "commit": subprocess.check_output(
         ["git", "-c", "safe.directory=" + str(git_dir.parent), "-C", str(git_dir.parent), "rev-parse", "HEAD"], text=True).strip()})
 assert revisions, "No downloaded public package/component repositories found"
