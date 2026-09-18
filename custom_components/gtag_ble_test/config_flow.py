@@ -20,6 +20,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_TRANSPORT, DOMAIN, SERVICE_UUID, TRANSPORT_BLE, TRANSPORT_ZIGBEE
 from .firmware_flow import FirmwareWizardMixin
+from .layout_flow import LayoutTransferMixin, excluded_entities
 from .layouts import (
     DECIMAL_PLACES, DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, StaleAfterTooShort,
     async_render_layout, normalize_saved_timing, preset_layout,
@@ -173,7 +174,7 @@ class GTagBLETestConfigFlow(FirmwareWizardMixin, ConfigFlow, domain=DOMAIN):
         )
 
 
-class GTagOptionsFlow(OptionsFlow):
+class GTagOptionsFlow(LayoutTransferMixin, OptionsFlow):
     """Choose a preset, inspect local pixels, then explicitly apply it."""
 
     def __init__(self) -> None:
@@ -181,6 +182,9 @@ class GTagOptionsFlow(OptionsFlow):
         self._preview = ""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="init", menu_options=["configure", "export_layout", "import_layout"])
+
+    async def async_step_configure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if self._settings is None:
             self._settings = normalize_saved_timing({
                 "preset": DEFAULT_PRESET, "update_interval": DEFAULT_INTERVAL, "stale_after": 15,
@@ -188,7 +192,7 @@ class GTagOptionsFlow(OptionsFlow):
             })
         schema = vol.Schema({
             vol.Required("preset", default=self._settings["preset"]): selector.SelectSelector(
-                selector.SelectSelectorConfig(options=list(PRESETS), translation_key="preset",
+                selector.SelectSelectorConfig(options=list(PRESETS) + (["custom"] if self._settings["preset"] == "custom" else []), translation_key="preset",
                                               mode=selector.SelectSelectorMode.DROPDOWN),
             ),
             vol.Required("update_interval", default=self._settings["update_interval"]): selector.NumberSelector(
@@ -218,16 +222,13 @@ class GTagOptionsFlow(OptionsFlow):
                     return await self.async_step_values()
                 return await self.async_step_preview()
         return self.async_show_form(
-            step_id="init", data_schema=self.add_suggested_values_to_schema(schema, self._settings),
+            step_id="configure", data_schema=self.add_suggested_values_to_schema(schema, self._settings),
             errors=errors, description_placeholders=placeholders, last_step=False,
         )
 
     async def async_step_values(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         registry = er.async_get(self.hass)
-        excluded = [item.entity_id for item in registry.entities.values()
-                    if item.platform == DOMAIN and not (
-                        item.domain == "sensor" and item.translation_key == "battery_voltage"
-                    )]
+        excluded = excluded_entities(self.hass)
         fields = {}
         count = value_count(self._settings["preset"])
         for index in range(1, count + 1):
@@ -271,9 +272,12 @@ class GTagOptionsFlow(OptionsFlow):
     async def async_step_preview(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             if user_input.get("action") == "edit":
-                return await self.async_step_init()
+                if self._import_document is not None:
+                    return await self.async_step_import_settings()
+                return await self.async_step_configure()
             if user_input.get("action") == "apply" and self._preview:
                 return self.async_create_entry(data={
+                    **self.config_entry.options,
                     "screen": validate_settings(self._settings),
                     # Applying the same preset again must also replace a later
                     # draw action; HA otherwise ignores identical options.

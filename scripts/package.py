@@ -11,6 +11,7 @@ def main() -> None:
     component = root / "custom_components" / "gtag_ble_test"
     for required in ("manifest.json", "LICENSE.txt", "services.yaml", "layouts.py", "battery.py", "zigbee.py",
                      "firmware_config.py", "firmware_flow.py", "firmware_download.py",
+                     "layout_transfer.py", "layout_flow.py", "layout_download.py",
                      "fonts/DejaVuSans.ttf", "fonts/LICENSE.txt",
                      "translations/en.json", "translations/ru.json", "brand/icon.png"):
         if not (component / required).is_file():

@@ -41,7 +41,8 @@ async def loaded(hass, entry, sent, monkeypatch):
 
 async def preview(hass, entry, preset="clock_two_values", **fields):
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["step_id"] == "init"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
+    assert result["step_id"] == "configure"
     result = await hass.config_entries.options.async_configure(result["flow_id"], {
         "preset": preset, "update_interval": 30,
     })
@@ -139,6 +140,7 @@ async def test_decimal_settings_preview_apply_updates_and_reload(hass, loaded, s
     await hass.async_block_till_done(wait_background_tasks=True)
     assert sent[-1] == expected.raw
     result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     result = await hass.config_entries.options.async_configure(result["flow_id"], {
         "preset": "clock_two_values", "update_interval": 30,
     })
@@ -161,6 +163,7 @@ def test_existing_layouts_keep_original_precision_by_default():
 
 async def test_invalid_precision_cannot_be_applied(hass, loaded, sent):
     result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     result = await hass.config_entries.options.async_configure(result["flow_id"], {
         "preset": "single_value", "update_interval": 5,
     })
@@ -191,7 +194,7 @@ async def test_refresh_and_edit_preview_do_not_send(hass, loaded, sent):
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"action": "refresh"})
     assert result["description_placeholders"]["preview"] != previous
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"action": "edit"})
-    assert result["step_id"] == "init"
+    assert result["step_id"] == "configure"
     assert sent == [] and not loaded.options
     hass.config_entries.options.async_abort(result["flow_id"])
 
@@ -226,6 +229,7 @@ async def test_clock_preset_and_ble_failure_keep_saved_settings(hass, loaded, se
 
 async def test_invalid_entities_and_lengths_keep_options_unchanged(hass, loaded, sent):
     result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     result = await hass.config_entries.options.async_configure(result["flow_id"], {
         "preset": "single_value", "update_interval": 5,
     })
@@ -270,9 +274,10 @@ async def test_short_freshness_timeout_can_be_corrected(
     hass, loaded, sent, preset, interval, stale_after, minimum,
 ):
     result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     values = {"preset": preset, "update_interval": interval, "stale_after": stale_after}
     result = await hass.config_entries.options.async_configure(result["flow_id"], values)
-    assert result["step_id"] == "init"
+    assert result["step_id"] == "configure"
     assert result["errors"] == {"stale_after": "stale_after_too_short"}
     assert result["description_placeholders"]["minimum"] == str(minimum)
     assert not loaded.options and not sent
@@ -289,6 +294,7 @@ async def test_short_freshness_timeout_can_be_corrected(
 ])
 async def test_freshness_minimum_and_disabled_setting_apply(hass, loaded, sent, interval, stale_after):
     result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     result = await hass.config_entries.options.async_configure(result["flow_id"], {
         "preset": "clock", "update_interval": interval, "stale_after": stale_after,
     })
@@ -303,15 +309,17 @@ async def test_freshness_minimum_and_disabled_setting_apply(hass, loaded, sent, 
 
 async def test_increasing_interval_rechecks_freshness_timeout(hass, loaded):
     result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     values = {"preset": "clock", "update_interval": 300, "stale_after": 10}
     result = await hass.config_entries.options.async_configure(result["flow_id"], values)
     await apply(hass, result)
     previous_options = dict(loaded.options)
     result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     result = await hass.config_entries.options.async_configure(result["flow_id"], {
         **values, "update_interval": 301,
     })
-    assert result["step_id"] == "init"
+    assert result["step_id"] == "configure"
     assert result["errors"] == {"stale_after": "stale_after_too_short"}
     assert result["description_placeholders"]["minimum"] == "11"
     assert loaded.options == previous_options
@@ -337,6 +345,7 @@ async def test_saved_short_timeout_loads_with_safe_minimum(
     assert loaded.runtime_data.freshness_timeout == expected_timeout * 60
     assert loaded.runtime_data.confirmed_timeout == expected_timeout * 60
     result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     defaults = result["data_schema"]({"preset": "clock", "update_interval": 300})
     assert defaults["stale_after"] == expected_timeout
     hass.config_entries.options.async_abort(result["flow_id"])

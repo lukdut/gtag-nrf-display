@@ -307,6 +307,7 @@ async def test_two_real_devices_route_draw_battery_options_and_reload_independen
     second_frames = list(delivered[SECOND])
     # Applying a different timeout/preset to the first screen leaves the second alone.
     flow = await hass.config_entries.options.async_init(zigbee_entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "configure"})
     flow = await hass.config_entries.options.async_configure(flow["flow_id"], {
         "preset": "clock", "update_interval": 5, "stale_after": 5,
     })
@@ -434,6 +435,7 @@ async def test_real_entities_options_preview_failure_and_reload(hass, zigbee_ent
     battery_id = registry.async_get_entity_id("sensor", DOMAIN, f"{identity}_battery_voltage")
     assert hass.states.get(battery_id).state == "4.1"
     result = await hass.config_entries.options.async_init(zigbee_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"preset": "clock", "update_interval": 5})
     assert result["step_id"] == "preview"
     assert not raw_frames  # Preview is local until Apply.

@@ -239,6 +239,7 @@ async def test_voltage_entity_available_as_screen_source(hass, entry, sent, batt
     assert state.attributes["unit_of_measurement"] == "V"
     assert state.attributes["firmware_supported"] is True
     result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "configure"})
     result = await hass.config_entries.options.async_configure(result["flow_id"], {
         "preset": "single_value", "update_interval": 5,
     })

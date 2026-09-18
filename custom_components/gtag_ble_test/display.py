@@ -110,7 +110,7 @@ class Display:
         self.freshness_timeout = settings["stale_after"] * 60
         self._options_revision = revision
         self.clock_enabled = settings["preset"] == "clock"
-        self.auto_update = True
+        self.auto_update = settings.get("auto_update", True)
         self.last_layout = None if self.clock_enabled else preset_layout(settings)
 
     async def async_apply_settings(self, settings: dict[str, Any], revision: str) -> None:

@@ -123,19 +123,6 @@
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Screen layout",
-        "description": "Choose a layout. You can preview it before applying.",
-        "data": {
-          "preset": "Layout",
-          "update_interval": "Minimum update interval",
-          "stale_after": "Show stale-data icon after"
-        },
-        "data_description": {
-          "update_interval": "Minimum pause between transfers, in seconds. Values update when their entities change; the clock updates once a minute. A longer pause reduces update frequency.",
-          "stale_after": "Minutes without confirmation from HA; at least twice the update interval, rounded up to whole minutes. 0 disables the check. The icon inverts pixels in the upper-right corner. Requires updated firmware and Zigbee converter."
-        }
-      },
       "values": {
         "title": "Display values",
         "description": "Choose the information to display. Empty labels and units use the entity's own name and unit.",
@@ -164,6 +151,59 @@
         "data": {
           "action": "Next step"
         }
+      },
+      "configure": {
+        "title": "Screen layout",
+        "description": "Choose a layout. You can preview it before applying.",
+        "data": {
+          "preset": "Layout",
+          "update_interval": "Minimum update interval",
+          "stale_after": "Show stale-data icon after"
+        },
+        "data_description": {
+          "update_interval": "Minimum pause between transfers, in seconds. Values update when their entities change; the clock updates once a minute. A longer pause reduces update frequency.",
+          "stale_after": "Minutes without confirmation from HA; at least twice the update interval, rounded up to whole minutes. 0 disables the check. The icon inverts pixels in the upper-right corner. Requires updated firmware and Zigbee converter."
+        }
+      },
+      "init": {
+        "title": "Screen layout",
+        "menu_options": {
+          "configure": "Configure layout",
+          "export_layout": "Export current layout",
+          "import_layout": "Import a layout file"
+        }
+      },
+      "export_layout": {
+        "title": "Export layout",
+        "description": "Save the current layout, labels, decimal precision, intervals and entity references. Sensor values and device hardware settings are not included.",
+        "data": {
+          "name": "Layout name"
+        }
+      },
+      "export_download": {
+        "title": "Layout ready to save",
+        "description": "{download_link_start}Download {filename}{download_link_end}\n\nThe link is valid for 20 minutes. Save the JSON and select it under another display’s settings → Import a layout file. Submit shows the link again.\n\nFile contents:\n\n```json\n{json}\n```"
+      },
+      "import_layout": {
+        "title": "Import layout",
+        "description": "Select a JSON file exported by GTag Display (up to 256 KiB). Choose the corresponding HA entities and inspect the preview. Changes are saved only after Apply. In custom templates, explicit entity IDs are remapped; computed names and area queries remain as stored in the file.",
+        "data": {
+          "file": "Layout file"
+        }
+      },
+      "import_entities": {
+        "title": "Match entities",
+        "description": "Entity {index} of {count}. The source layout used `{source}`. Choose the entity that should provide these values on this display.",
+        "data": {
+          "entity_id": "Entity for this display"
+        }
+      },
+      "import_settings": {
+        "title": "Edit imported layout",
+        "menu_options": {
+          "import_remap": "Match entities again",
+          "import_configure": "Change layout settings"
+        }
       }
     },
     "error": {
@@ -171,7 +211,17 @@
       "stale_after_too_short": "Enter at least {minimum} minutes to cover two update intervals, or 0 to disable the check.",
       "entity_not_found": "Choose an existing entity.",
       "invalid_entity": "Display diagnostics cannot be used as a source for the screen.",
-      "render_failed": "Unable to draw the preview. Edit the settings or check the Home Assistant log."
+      "render_failed": "Unable to draw the preview. Edit the settings or check the Home Assistant log.",
+      "invalid_layout_file": "The file is damaged or is not a valid GTag Display layout.",
+      "unsupported_layout_version": "This layout format version is unsupported. Update the integration.",
+      "layout_file_too_large": "The layout file must be at most 256 KiB.",
+      "invalid_entity_mapping": "Select a matching HA entity for every source entity.",
+      "no_layout_to_export": "No saved layout. Configure the display or send a layout with Draw first. Raw test images have no exportable layout.",
+      "layout_download_unavailable": "Unable to create a download link. Copy the JSON below or try again."
+    },
+    "abort": {
+      "layout_exported": "{download_link_start}Download {filename}{download_link_end}\n\nThe link is valid for 20 minutes, until HA restarts. Display settings have not changed.",
+      "layout_upload_unavailable": "Unable to enable file uploads in HA."
     }
   },
   "selector": {
@@ -179,7 +229,8 @@
       "options": {
         "clock": "Clock and date",
         "single_value": "One large value",
-        "clock_two_values": "Clock and two values"
+        "clock_two_values": "Clock and two values",
+        "custom": "Custom layout"
       }
     },
     "preview_action": {

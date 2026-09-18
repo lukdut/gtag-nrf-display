@@ -30,10 +30,13 @@ for (const file of ['strings.json', 'translations/en.json', 'translations/ru.jso
     download_link_start: '<a href="/api/gtag_ble_test/firmware/test-flow?authSig=test.signature" target="_blank">',
     download_link_end: '</a>',
     yaml: 'substitutions:\n  gtag_friendly_name: "Кухня {1} <test>"\n',
+    json: '{"name":"Макет {1}","screen":{"preset":"clock"}}',
   };
   const descriptions = {
     download: data.config.step.firmware_download.description,
     finished: data.config.abort.firmware_ready,
+    layout_export: data.options.step.export_download.description,
+    layout_exported: data.options.abort.layout_exported,
   };
   for (const [step, description] of Object.entries(descriptions)) {
     test(`${file}: ${step} formats before Markdown and retains the download target`, () => {
@@ -45,6 +48,7 @@ for (const file of ['strings.json', 'translations/en.json', 'translations/ru.jso
       const label = language === 'ru' ? 'Скачать' : 'Download';
       assert.ok(html.includes(`${values.download_link_start}${label} ${values.filename}</a>`), html);
       if (step === 'download') assert.ok(message.includes(values.yaml));
+      if (step === 'layout_export') assert.ok(message.includes(values.json));
     });
   }
 }

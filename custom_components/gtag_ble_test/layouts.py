@@ -19,7 +19,9 @@ DEFAULT_INTERVAL = 5
 DECIMAL_PLACES = ("original", "0", "1", "2", "3", "4", "5", "6")
 
 SETTINGS_SCHEMA = vol.Schema({
-    vol.Required("preset"): vol.In(PRESETS),
+    vol.Required("preset"): vol.In((*PRESETS, "custom")),
+    vol.Optional("layout"): LAYOUT_SCHEMA,
+    vol.Optional("auto_update"): bool,
     vol.Optional("update_interval", default=DEFAULT_INTERVAL): vol.All(vol.Coerce(int), vol.Range(min=5, max=3600)),
     vol.Optional("stale_after", default=15): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
     **{vol.Optional(f"entity_{index}"): cv.entity_id for index in (1, 2)},
@@ -58,6 +60,13 @@ def normalize_saved_timing(settings: dict[str, Any]) -> dict[str, Any]:
 def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings = SETTINGS_SCHEMA(settings)
     validate_timing(settings)
+    if settings["preset"] == "custom":
+        if "layout" not in settings:
+            raise vol.Invalid("A custom layout is required", ["layout"])
+        settings.setdefault("auto_update", True)
+    else:
+        settings.pop("layout", None)
+        settings.pop("auto_update", None)
     for index in range(1, value_count(settings["preset"]) + 1):
         if not settings.get(f"entity_{index}"):
             raise vol.Invalid(f"entity_{index} is required for this preset", [f"entity_{index}"])
@@ -108,6 +117,8 @@ def _value(settings: dict, index: int) -> str:
 def preset_layout(settings: dict[str, Any]) -> dict[str, Any]:
     """Return a persistent template layout. No HA states are read here."""
     settings = validate_settings(settings)
+    if settings["preset"] == "custom":
+        return deepcopy(settings["layout"])
     text = lambda x, y, value, size, width, align="left": {
         "type": "text", "x": x, "y": y, "text": value, "size": size,
         "max_width": width, "align": align,
