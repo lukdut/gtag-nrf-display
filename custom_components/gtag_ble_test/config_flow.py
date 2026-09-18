@@ -20,6 +20,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_TRANSPORT, DOMAIN, SERVICE_UUID, TRANSPORT_BLE, TRANSPORT_ZIGBEE
 from .firmware_flow import FirmwareWizardMixin
+from .diagnostic_flow import DiagnosticFlowMixin
 from .layout_flow import LayoutTransferMixin, excluded_entities
 from .layouts import (
     DECIMAL_PLACES, DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, StaleAfterTooShort,
@@ -174,7 +175,7 @@ class GTagBLETestConfigFlow(FirmwareWizardMixin, ConfigFlow, domain=DOMAIN):
         )
 
 
-class GTagOptionsFlow(LayoutTransferMixin, OptionsFlow):
+class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
     """Choose a preset, inspect local pixels, then explicitly apply it."""
 
     def __init__(self) -> None:
@@ -182,7 +183,7 @@ class GTagOptionsFlow(LayoutTransferMixin, OptionsFlow):
         self._preview = ""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="init", menu_options=["configure", "export_layout", "import_layout"])
+        return self.async_show_menu(step_id="init", menu_options=["configure", "export_layout", "import_layout", "diagnostics"])
 
     async def async_step_configure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if self._settings is None:

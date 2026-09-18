@@ -215,7 +215,7 @@ try {
         const definition = prepareDefinition(converter.default[0]);
         assert.ok(definition.toZigbee.includes(frameConverter));
         const properties = definition.exposes.map((expose) => expose.property);
-        for (const property of ['test_image', 'frame', 'frame_status', 'frame_error', 'battery_voltage_1', 'display_pattern_3'])
+        for (const property of ['test_image', 'frame_status', 'frame_error', 'battery_voltage_1', 'check_connection', 'connection_status'])
             assert.ok(properties.includes(property), property);
         assert.equal(crc32(Buffer.from('123456789')), 0xcbf43926);
     });
@@ -224,7 +224,7 @@ try {
         const noBattery = prepareDefinition(converter.default[1]);
         const properties = noBattery.exposes.map((expose) => expose.property);
         assert.ok(!properties.includes('battery_voltage_1'));
-        for (const property of ['frame', 'frame_request_id', 'rendered_frames_2', 'display_pattern_3'])
+        for (const property of ['frame_request_id', 'check_connection', 'connection_status'])
             assert.ok(properties.includes(property), property);
         assert.deepEqual(normal.endpoint({}), {'1': 1, '2': 2, '3': 3, '4': 4});
         assert.deepEqual(noBattery.endpoint({}), {'2': 1, '3': 2, '4': 3});
@@ -474,6 +474,101 @@ try {
         assert.equal(states.at(-1).frame_status, 'error');
         await first;
         assert.equal(states.at(-1).frame_request_id, 'first');
+    });
+    await test('exposes keep useful diagnostics and compatibility, while raw MQTT commands remain', async () => {
+        for (const source of converter.default) {
+            const definition = prepareDefinition(source);
+            const properties = definition.exposes.map((item) => item.property);
+            for (const hidden of ['frame', 'frame_freshness', 'firmware_capabilities', 'frame_crc32',
+                'frame_id', 'frame_stale_frame_id', 'freshness_request_id', 'freshness_status',
+                'freshness_error', 'freshness_frame_id', 'freshness_crc32', 'freshness_sequence',
+                'power_diagnostics', 'rendered_frames_2', 'display_pattern_3'])
+                assert.ok(!properties.includes(hidden), hidden);
+            for (const key of ['frame', 'frame_freshness', 'power_diagnostics', 'display_pattern'])
+                assert.ok(definition.toZigbee.some((item) => item.key.includes(key)), key);
+            assert.ok(properties.includes('frame_request_id'), 'Released HA discovery still works');
+        }
+    });
+    await test('connection check is correlated and does not alter LCD pixels or renew freshness', async () => {
+        const ep = endpoint();
+        await transferFrame(ep, testImage(), {session: 567, freshnessTimeout: 60, sleep: noSleep});
+        await request('advance', {ms: 60_000});
+        const before = await request('inspect');
+        const packets = [], states = [];
+        const diagnosticEndpoint = endpoint(async (phase, packet) => {
+            if (phase === 'before') packets.push(packet[0]);
+        });
+        const meta = {device: {ieeeAddr: '0xdiagnostics', endpoints: [diagnosticEndpoint]},
+            publish: (state) => states.push(state)};
+        await converter.connectionConverter.convertSet(null, 'check_connection', {request_id: 'check-1'}, meta);
+        assert.deepEqual(packets, [7]);
+        assert.equal(states[0].connection_status, 'checking');
+        const last = states.at(-1);
+        assert.equal(last.connection_status, 'ok');
+        assert.equal(last.connection_request_id, 'check-1');
+        assert.equal(last.firmware_version, '0.9.0');
+        assert.ok(last.connection_checked_at);
+        assert.deepEqual(await request('inspect'), before);
+        await converter.connectionConverter.convertSet(null, 'check_connection', 'check', meta);
+        assert.equal(states.at(-1).connection_request_id, null, 'UI cannot reuse an HA request ID');
+    });
+    await test('connection check distinguishes legacy, invalid reply, timeout and incompatible firmware', async () => {
+        for (const kind of ['legacy', 'invalid_response', 'timeout', 'incompatible_firmware']) {
+            const states = [];
+            const ep = endpoint(async (phase, packet, ack) => {
+                if (phase === 'after' && packet[0] === 7 && kind === 'incompatible_firmware') { ack[4] = 2; ack[5] = 2; }
+            });
+            const original = ep.command.bind(ep);
+            ep.command = async (...args) => {
+                if (kind === 'timeout') throw new Error('No radio reply');
+                if (kind === 'invalid_response') return {payload: Buffer.from([1, 7, 0])};
+                if (kind === 'legacy') {
+                    const data = Buffer.alloc(20); data[0] = 1; data[1] = 7; data[2] = 2;
+                    return {payload: data};
+                }
+                return original(...args);
+            };
+            const meta = {device: {ieeeAddr: '0xdiagnostics', endpoints: [ep]}, publish: (state) => states.push(state)};
+            await converter.connectionConverter.convertSet(null, 'check_connection', {request_id: kind}, meta);
+            const last = states.at(-1);
+            assert.equal(last.connection_status, kind === 'legacy' ? 'ok' : 'error');
+            assert.equal(last.connection_error_code, kind === 'legacy' ? '' : kind);
+            assert.equal(last.connection_request_id, kind);
+            if (kind === 'legacy') assert.equal(last.firmware_legacy, true);
+        }
+        assert.equal((await request('inspect')).frames, 0);
+    });
+    await test('connection check cannot overlap frame operations and one offline device cannot block another', async () => {
+        let release, entered;
+        const blocked = new Promise((resolve) => {release = resolve;});
+        const started = new Promise((resolve) => {entered = resolve;});
+        const firstStates = [], secondStates = [];
+        const first = {device: {ieeeAddr: '0xfirst', endpoints: [{supportsInputCluster: () => true,
+            command: async () => {entered(); await blocked; throw new Error('Offline');}}]},
+            publish: (state) => firstStates.push(state)};
+        const second = {device: {ieeeAddr: '0xsecond', endpoints: [endpoint()]}, publish: (state) => secondStates.push(state)};
+        const running = converter.connectionConverter.convertSet(null, 'check_connection', {request_id: 'first'}, first);
+        await started;
+        try {
+            await converter.connectionConverter.convertSet(null, 'check_connection', {request_id: 'busy'}, first);
+            assert.equal(firstStates.at(-1).connection_error_code, 'device_busy');
+            assert.equal(firstStates.at(-1).connection_request_id, 'busy');
+            await assert.rejects(frameConverter.convertSet(null, 'test_image', 'zigbee', first), /already in progress/);
+            await converter.connectionConverter.convertSet(null, 'check_connection', {request_id: 'second'}, second);
+            assert.equal(secondStates.at(-1).connection_status, 'ok');
+        } finally { release(); await running; }
+        first.device.endpoints = [endpoint()];
+        await converter.connectionConverter.convertSet(null, 'check_connection', 'check', first);
+        assert.equal(firstStates.at(-1).connection_status, 'ok');
+    });
+    await test('publication failure releases the connection-check lock', async () => {
+        const meta = {device: {ieeeAddr: '0xpublication', endpoints: [endpoint()]},
+            publish: () => {throw new Error('MQTT publication failed');}};
+        await assert.rejects(converter.connectionConverter.convertSet(null, 'check_connection', 'check', meta), /publication failed/);
+        const states = [];
+        meta.publish = (state) => states.push(state);
+        await converter.connectionConverter.convertSet(null, 'check_connection', 'check', meta);
+        assert.equal(states.at(-1).connection_status, 'ok');
     });
     console.log(`${passed} Zigbee converter/firmware tests passed`);
 } finally {

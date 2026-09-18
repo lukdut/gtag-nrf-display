@@ -22,6 +22,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_BLE, TRANSPORT_ZIGBEE
 from .battery import BatteryMonitor
+from .connection import ConnectionCheck
 from .frame_protocol import PreparedFrame
 from .layouts import async_render_layout, normalize_saved_timing, preset_layout, upgrade_saved_preset, validate_settings
 from .render import LAYOUT_SCHEMA, RenderedFrame, clock_layout, from_raw
@@ -92,6 +93,7 @@ class Display:
 
             self.zigbee = ZigbeeTransport(hass, entry, self._notify, self._on_link_restored)
         self.battery = self.zigbee or BatteryMonitor(hass, self.address, self._notify)
+        self.connection_check = ConnectionCheck(self)
 
     @property
     def device_firmware_info(self) -> dict:
@@ -135,6 +137,8 @@ class Display:
             _LOGGER.warning("%s: ignoring invalid saved display settings", self.address)
             saved = {}
         self._options_revision = saved.get("options_revision")
+        if isinstance(saved.get("last_success"), str):
+            self.last_success = dt_util.parse_datetime(saved["last_success"])
         self.clock_enabled = saved.get("clock_enabled", False) is True
         self.auto_update = saved.get("auto_update", True) is True
         if saved.get("layout") is not None:
@@ -162,12 +166,16 @@ class Display:
                 Template(element["text"], self.hass).ensure_valid()
         return layout
 
-    async def _save(self) -> None:
-        await self._store.async_save({
+    def _saved_data(self) -> dict:
+        return {
             "clock_enabled": self.clock_enabled, "layout": self.last_layout,
             "auto_update": self.auto_update,
             "options_revision": self._options_revision,
-        })
+            "last_success": self.last_success.isoformat() if self.last_success else None,
+        }
+
+    async def _save(self) -> None:
+        await self._store.async_save(self._saved_data())
 
     @callback
     def subscribe(self, listener: Callable[[], None]) -> Callable[[], None]:
@@ -442,6 +450,7 @@ class Display:
                     self.preview = frame.png
                     self._last_frame = frame.raw
                     self.last_success = dt_util.utcnow()
+                    self._store.async_delay_save(self._saved_data, 30)
                     self._last_success_time = self.hass.loop.time()
                     self._confirmed_at = confirmation_start
                     self.confirmed_timeout = report_attributes.get("freshness_timeout", sent_timeout)
@@ -470,7 +479,11 @@ class Display:
             self._worker = None
 
     async def async_close(self) -> None:
+        if self._closed:
+            return
+        saved_clock_enabled = self.clock_enabled
         self._closed = True
+        await self.connection_check.async_close()
         if self._freshness_unsubscribe is not None:
             self._freshness_unsubscribe()
             self._freshness_unsubscribe = None
@@ -484,4 +497,8 @@ class Display:
             self._worker.cancel()
             with suppress(asyncio.CancelledError):
                 await self._worker
+        if self.last_success is not None:
+            # Flush/cancel the delayed write before a new Display instance loads
+            # the same store. An old timer must never overwrite new settings.
+            await self._store.async_save({**self._saved_data(), "clock_enabled": saved_clock_enabled})
         self._listeners.clear()

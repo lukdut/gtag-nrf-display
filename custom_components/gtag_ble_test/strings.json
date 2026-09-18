@@ -154,11 +154,12 @@
         }
       },
       "init": {
-        "title": "Screen layout",
+        "title": "Device settings",
         "menu_options": {
           "configure": "Configure layout",
           "export_layout": "Export current layout",
-          "import_layout": "Import a layout file"
+          "import_layout": "Import a layout file",
+          "diagnostics": "Device diagnostics"
         }
       },
       "export_layout": {
@@ -192,6 +193,13 @@
           "import_remap": "Match entities again",
           "import_configure": "Change layout settings"
         }
+      },
+      "diagnostics": {
+        "title": "Device diagnostics",
+        "description": "**Connection:** {transport}\n\n**Firmware:** {firmware}\n\n**Features:** {features}\n\n**Codecs:** {codecs}\n\n**Battery:** {battery}\n\n**Last successful display update:** {last_update}\n\n**Last data confirmation:** {last_confirmation}\n\n**Transfer:** {display_status}\n\n**Freshness:** {stale}\n\n**Update error:** {display_error}\n\n---\n\n**Last connection check:** {check_status}\n\n**Checked at:** {checked_at} · {duration} s\n\n**Reason / next step:** {check_error}\n\n**Technical details:** {check_detail}\n\nThe check waits up to 60 seconds for a fresh device reply. It does not change the image or renew its freshness. The result describes the moment of the check. Refresh information reads HA data without contacting the device.",
+        "data": {
+          "action": "Action"
+        }
       }
     },
     "error": {
@@ -209,7 +217,11 @@
     },
     "abort": {
       "layout_exported": "{download_link_start}Download {filename}{download_link_end}\n\nThe link is valid for 20 minutes, until HA restarts. Display settings have not changed.",
-      "layout_upload_unavailable": "Unable to enable file uploads in HA."
+      "layout_upload_unavailable": "Unable to enable file uploads in HA.",
+      "diagnostics_unavailable": "The integration is unloaded. Enable or reload the device in HA."
+    },
+    "progress": {
+      "checking_connection": "Waiting for a fresh device reply. This can take up to 60 seconds."
     }
   },
   "selector": {
@@ -258,12 +270,101 @@
         "edit": "Edit settings",
         "refresh": "Refresh download link"
       }
+    },
+    "diagnostic_value": {
+      "options": {
+        "unknown": "No data yet",
+        "none": "None",
+        "disabled": "Disabled",
+        "legacy": "Legacy firmware (version not reported)",
+        "freshness": "Stale-data icon",
+        "battery_voltage": "Battery measurement",
+        "battery_bar": "Battery bar",
+        "battery_protection": "Low-battery protection",
+        "raw": "Uncompressed (RAW)",
+        "white_rle_v1": "White-pixel compression (WHITE_RLE_V1)",
+        "idle": "No transfers yet",
+        "queued": "Update queued",
+        "sending": "Sending image",
+        "sent": "Image delivered",
+        "unchanged": "Image unchanged",
+        "stale": "Data is stale",
+        "fresh": "Data confirmed",
+        "not_checked": "Not checked yet",
+        "checking": "Waiting for a device reply",
+        "ok": "Device replied",
+        "error": "Check failed",
+        "unloaded": "The integration is unloaded. Enable or reload the device in HA.",
+        "device_busy": "The device is busy sending an image or reading the battery. Try again shortly.",
+        "mqtt_offline": "HA is disconnected from MQTT. Check the MQTT integration and broker.",
+        "bridge_offline": "Zigbee2MQTT is offline. Start it and retry.",
+        "device_missing": "The device is absent from Zigbee2MQTT. Check pairing and the selected MQTT base topic.",
+        "converter_update_required": "Update gtag-display.mjs in Zigbee2MQTT from the same package as the HA integration.",
+        "timeout": "No fresh reply arrived. Check power and radio coverage; for Zigbee also check the converter. Low-battery protection switches the radio off.",
+        "incompatible_firmware": "The device replied, but its frame format is unsupported. Check firmware and integration versions.",
+        "invalid_response": "The device returned an invalid response. Check firmware and converter versions.",
+        "bluetooth_unavailable": "No connectable Bluetooth advertisement found. Check power, range and the HA Bluetooth adapter/proxy.",
+        "communication_error": "Communication failed. Check the details below, power and the selected transport.",
+        "transfer_error": "Image transfer failed"
+      }
+    },
+    "diagnostic_action": {
+      "options": {
+        "check": "Check connection",
+        "refresh": "Refresh information",
+        "back": "Back to menu"
+      }
     }
   },
   "entity": {
     "binary_sensor": {
       "display_stale": {
         "name": "Display data stale"
+      }
+    },
+    "button": {
+      "check_connection": {
+        "name": "Check connection"
+      }
+    },
+    "sensor": {
+      "connection_check": {
+        "name": "Connection check",
+        "state": {
+          "not_checked": "Not checked yet",
+          "checking": "Waiting for a device reply",
+          "ok": "Device replied",
+          "error": "Check failed"
+        },
+        "state_attributes": {
+          "error_code": {
+            "name": "Reason",
+            "state": {
+              "unloaded": "The integration is unloaded. Enable or reload the device in HA.",
+              "device_busy": "The device is busy sending an image or reading the battery. Try again shortly.",
+              "mqtt_offline": "HA is disconnected from MQTT. Check the MQTT integration and broker.",
+              "bridge_offline": "Zigbee2MQTT is offline. Start it and retry.",
+              "device_missing": "The device is absent from Zigbee2MQTT. Check pairing and the selected MQTT base topic.",
+              "converter_update_required": "Update gtag-display.mjs in Zigbee2MQTT from the same package as the HA integration.",
+              "timeout": "No fresh reply arrived. Check power and radio coverage; for Zigbee also check the converter. Low-battery protection switches the radio off.",
+              "incompatible_firmware": "The device replied, but its frame format is unsupported. Check firmware and integration versions.",
+              "invalid_response": "The device returned an invalid response. Check firmware and converter versions.",
+              "bluetooth_unavailable": "No connectable Bluetooth advertisement found. Check power, range and the HA Bluetooth adapter/proxy.",
+              "communication_error": "Communication failed. Check the details below, power and the selected transport."
+            }
+          }
+        }
+      }
+    }
+  },
+  "services": {
+    "check_connection": {
+      "name": "Check connection",
+      "description": "Request a fresh device reply. See the result in diagnostics or return it to an automation. The image and freshness timer are unchanged.",
+      "fields": {
+        "device_id": {
+          "name": "Display"
+        }
       }
     }
   }

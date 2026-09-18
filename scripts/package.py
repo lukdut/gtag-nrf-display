@@ -12,6 +12,7 @@ def main() -> None:
     for required in ("manifest.json", "LICENSE.txt", "services.yaml", "layouts.py", "battery.py", "zigbee.py",
                      "firmware_config.py", "firmware_flow.py", "firmware_download.py",
                      "layout_transfer.py", "layout_flow.py", "layout_download.py",
+                     "connection.py", "diagnostic_flow.py",
                      "fonts/DejaVuSans.ttf", "fonts/LICENSE.txt",
                      "translations/en.json", "translations/ru.json", "brand/icon.png"):
         if not (component / required).is_file():

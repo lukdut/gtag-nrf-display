@@ -4,6 +4,7 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.entity import EntityCategory
 
 from .entity import GTagEntity
 
@@ -23,8 +24,21 @@ async def async_setup_entry(
         [
             SendTestFrameButton(config_entry.runtime_data),
             RefreshDisplayButton(config_entry.runtime_data),
+            CheckConnectionButton(config_entry.runtime_data),
         ]
     )
+
+
+class CheckConnectionButton(GTagEntity, ButtonEntity):
+    _attr_translation_key = "check_connection"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:connection"
+
+    def __init__(self, display):
+        super().__init__(display, "check_connection")
+
+    async def async_press(self) -> None:
+        await self.display.connection_check.async_run()
 
 
 def _set_black(frame: bytearray, x: int, y: int) -> None:

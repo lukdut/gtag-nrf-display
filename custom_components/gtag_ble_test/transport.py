@@ -179,6 +179,39 @@ async def connect(hass: Any, address: str, *, use_services_cache: bool = True) -
                                       max_attempts=2, timeout=20.0,
                                       use_services_cache=use_services_cache)
 
+
+async def check_connection(hass: Any, address: str) -> FirmwareInfo:
+    """Read a fresh INFO/legacy STATUS; never write frame or freshness data."""
+    from .connection import ConnectionCheckError
+
+    lock = get_operation_lock(hass, address)
+    if lock.locked():
+        raise ConnectionCheckError("device_busy")
+    async with lock:
+        for attempt in range(2):
+            client = None
+            try:
+                client = await connect(hass, address, use_services_cache=attempt == 0)
+                try:
+                    async with asyncio.timeout(OPERATION_TIMEOUT_S):
+                        raw = await client.read_gatt_char(INFO_CHAR_UUID)
+                except BleakCharacteristicNotFoundError:
+                    if attempt == 0:
+                        if hasattr(client, "clear_cache"):
+                            await client.clear_cache()
+                        continue
+                    # Missing INFO alone is insufficient evidence of a working GTag.
+                    async with asyncio.timeout(OPERATION_TIMEOUT_S):
+                        Status.parse(await client.read_gatt_char(STATUS_CHAR_UUID))
+                    return FirmwareInfo.legacy_v1()
+                return FirmwareInfo.parse(bytes(raw))
+            except TransferResyncError as err:
+                raise ConnectionCheckError("bluetooth_unavailable", str(err)) from err
+            except (ValueError, TransferProtocolError) as err:
+                raise ConnectionCheckError("invalid_response", str(err)) from err
+            finally:
+                await _disconnect(client)
+
 class FrameSender:
     """One press = one frame_id, retained across retries and reconnections."""
     def __init__(self, connect_client: Callable[[], Awaitable[Any]], address: str,

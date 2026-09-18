@@ -17,9 +17,11 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .firmware_info import FirmwareInfo
+from .connection import ConnectionCheckError
 
 DISCOVERY_TIMEOUT = 10
 TRANSFER_TIMEOUT = 240
+CHECK_TIMEOUT = 45
 DEFAULT_BASE_TOPIC = "zigbee2mqtt"
 NO_BATTERY_MODEL = "GTag_Display_Frame_NoBat"
 
@@ -54,6 +56,7 @@ def devices_from_payload(payload: str) -> dict[str, dict]:
         properties = {e["property"] for e in exposes
                       if isinstance(e, dict) and isinstance(e.get("property"), str)} if isinstance(exposes, list) else set()
         devices[ieee.lower()] = {"friendly_name": name, "compatible": "frame_request_id" in properties,
+                                 "connection_check_supported": "check_connection" in properties,
                                  "battery_supported": item["model_id"] != NO_BATTERY_MODEL}
     return devices
 
@@ -121,6 +124,9 @@ class ZigbeeTransport:
         self._confirming = False
         self._lock = asyncio.Lock()
         self.firmware_info: dict = {}
+        self._check_supported: bool | None = None
+        self._check_pending: asyncio.Future | None = None
+        self._check_request_id: str | None = None
 
     @property
     def available(self) -> bool:
@@ -153,6 +159,19 @@ class ZigbeeTransport:
     def _fail_pending(self, message: str) -> None:
         if self._pending is not None and not self._pending.done():
             self._pending.set_exception(HomeAssistantError(message))
+        if self._check_pending is not None and not self._check_pending.done():
+            self._check_pending.set_exception(ConnectionCheckError(self._check_problem() or "communication_error", message))
+
+    def _check_problem(self) -> str | None:
+        if self._closed:
+            return "unloaded"
+        if not self._connected:
+            return "mqtt_offline"
+        if self._bridge_online is False:
+            return "bridge_offline"
+        if not self._present:
+            return "device_missing"
+        return None
 
     @callback
     def _connection_changed(self, connected: bool) -> None:
@@ -196,6 +215,7 @@ class ZigbeeTransport:
         was_available = self.available
         self._present = device is not None
         if device is not None:
+            self._check_supported = device["connection_check_supported"]
             self.supported = device["battery_supported"]
             if not self.supported:
                 self._voltage = None
@@ -232,6 +252,14 @@ class ZigbeeTransport:
     @callback
     def _state(self, message) -> None:
         state = _json_object(message.payload)
+        if (not getattr(message, "retain", False) and self._check_pending is not None
+                and not self._check_pending.done() and state.get("connection_request_id") == self._check_request_id):
+            if state.get("connection_status") == "ok":
+                self._check_pending.set_result(state)
+            elif state.get("connection_status") == "error":
+                self._check_pending.set_exception(ConnectionCheckError(
+                    state.get("connection_error_code") or "communication_error",
+                    str(state.get("connection_error") or "")))
         if "firmware_capabilities" in state:
             try:
                 value = state["firmware_capabilities"]
@@ -345,6 +373,37 @@ class ZigbeeTransport:
                 self._pending = None
                 self._request_id = None
                 self._confirming = False
+
+    async def async_check_connection(self) -> FirmwareInfo:
+        if problem := self._check_problem():
+            raise ConnectionCheckError(problem)
+        if self._check_supported is False:
+            raise ConnectionCheckError("converter_update_required")
+        if self._lock.locked():
+            raise ConnectionCheckError("device_busy")
+        async with self._lock:
+            self._check_request_id = secrets.token_hex(16)
+            pending = self._check_pending = self.hass.loop.create_future()
+            try:
+                async with asyncio.timeout(CHECK_TIMEOUT):
+                    await mqtt.async_publish(self.hass, f"{self.base_topic}/{self.address}/set", json.dumps({
+                        "check_connection": {"request_id": self._check_request_id},
+                    }), qos=0, retain=False)
+                    result = await pending
+                try:
+                    value = result.get("firmware_capabilities")
+                    return FirmwareInfo.from_dict(json.loads(value) if isinstance(value, str) else value)
+                except (ValueError, TypeError) as err:
+                    raise ConnectionCheckError("invalid_response", str(err)) from err
+            except TimeoutError as err:
+                raise ConnectionCheckError("timeout") from err
+            finally:
+                if not pending.done():
+                    pending.cancel()
+                elif not pending.cancelled():
+                    pending.exception()
+                self._check_pending = None
+                self._check_request_id = None
 
     async def async_close(self) -> None:
         self._closed = True

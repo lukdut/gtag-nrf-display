@@ -17,6 +17,8 @@ export const frameCluster = {
     }},
 };
 
+class FirmwareInfoResponseError extends Error {}
+
 // Discovery opcode/schema are stable even when the frame protocol changes.
 export function parseFirmwareInfo(payload) {
     const data = Buffer.from(payload ?? []);
@@ -51,7 +53,8 @@ export async function readFirmwareInfo(endpoint, sleep = pause) {
         }
     }
     // A timeout is not evidence of old firmware. Never silently downgrade it.
-    return parseFirmwareInfo(result?.payload);
+    try { return parseFirmwareInfo(result?.payload); }
+    catch (error) { throw new FirmwareInfoResponseError(error.message); }
 }
 function validateFirmwareInfo(info) {
     if (!(info.protocol_min <= 1 && info.protocol_max >= 1))
@@ -400,6 +403,57 @@ export const infoConverter = {
     },
 };
 
+export const connectionConverter = {
+    key: ['check_connection'],
+    convertSet: async (entity, key, value, meta) => {
+        const requestId = value === 'check' ? null : value?.request_id;
+        if (value !== 'check' && (typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(requestId)))
+            throw new Error('check_connection requires "check" or {request_id}');
+        const device = meta.device;
+        if (!device?.ieeeAddr) throw new Error('Select a single GTag device');
+        const started = Date.now();
+        const publish = (status, code = '', error = '', extra = {}) => meta.publish({
+            connection_request_id: requestId, connection_status: status,
+            connection_error_code: code, connection_error: error,
+            connection_checked_at: status === 'checking' ? null : new Date().toISOString(),
+            connection_duration_ms: status === 'checking' ? null : Date.now() - started, ...extra,
+        });
+        if (inFlight.has(device.ieeeAddr)) {
+            publish('error', 'device_busy', 'A frame operation is in progress; try again after it finishes');
+            return;
+        }
+        const endpoint = device.endpoints.find((ep) => ep.supportsInputCluster(frameCluster.ID));
+        if (!endpoint) {
+            publish('error', 'incompatible_firmware', 'GTag frame endpoint missing; re-interview the device');
+            return;
+        }
+        inFlight.add(device.ieeeAddr);
+        try {
+            publish('checking');
+            let result;
+            try {
+                result = await readFirmwareInfo(endpoint);
+            } catch (error) {
+                // A missing radio reply must never become a successful legacy check.
+                publish('error', error instanceof FirmwareInfoResponseError ? 'invalid_response' : 'timeout', error.message);
+                return;
+            }
+            try {
+                validateFirmwareInfo(result);
+            } catch (error) {
+                publish('error', 'incompatible_firmware', error.message, infoState(result));
+                return;
+            }
+            publish('ok', '', '', infoState(result));
+        } finally {
+            inFlight.delete(device.ieeeAddr);
+        }
+    },
+};
+
+// Preserve old MQTT commands/reporting without presenting raw protocol controls.
+const withoutExposes = (extension) => ({...extension, exposes: []});
+
 function definition(battery) {
     return {
     zigbeeModel: [battery ? 'GTag_Display_Frame_V1' : 'GTag_Display_Frame_NoBat'],
@@ -412,12 +466,12 @@ function definition(battery) {
         ...(battery ? [m.numeric({name: 'battery_voltage', label: 'Battery voltage', endpointNames: ['1'],
             cluster: 'genAnalogInput', attribute: 'presentValue', unit: 'V', access: 'STATE_GET',
             reporting: {min: 30, max: 300, change: 0.01}})] : []),
-        m.numeric({name: 'rendered_frames', label: 'Rendered frames', endpointNames: ['2'],
+        withoutExposes(m.numeric({name: 'rendered_frames', label: 'Rendered frames', endpointNames: ['2'],
             cluster: 'genAnalogInput', attribute: 'presentValue', access: 'STATE_GET',
-            reporting: {min: 0, max: 300, change: 1}}),
-        m.numeric({name: 'display_pattern', label: 'Display pattern', endpointNames: ['3'],
+            reporting: {min: 0, max: 300, change: 1}})),
+        withoutExposes(m.numeric({name: 'display_pattern', label: 'Display pattern', endpointNames: ['3'],
             cluster: 'genAnalogOutput', attribute: 'presentValue', access: 'ALL',
-            valueMin: 0, valueMax: 3, valueStep: 1, reporting: {min: 0, max: 300, change: 1}}),
+            valueMin: 0, valueMax: 3, valueStep: 1, reporting: {min: 0, max: 300, change: 1}})),
     ],
     fromZigbee: [{cluster: 'gtagFrame', type: ['commandReply'], convert: (model, msg) => {
         const data = Buffer.from(msg.data?.payload ?? []);
@@ -431,38 +485,28 @@ function definition(battery) {
         if (data.length !== 40 || data[0] !== 1 || data[1] !== 5 || data[2] !== 0 || (data[3] & ~3)) return {};
         return {power_diagnostics: JSON.stringify(parsePowerDiagnostics(data))};
     }}],
-    toZigbee: [frameConverter, powerConverter, freshnessConverter, infoConverter],
+    toZigbee: [frameConverter, powerConverter, freshnessConverter, infoConverter, connectionConverter],
     exposes: [
         e.text('firmware_version', ea.STATE_GET).withCategory('diagnostic'),
         e.text('firmware_codecs', ea.STATE).withCategory('diagnostic'),
         e.text('firmware_features', ea.STATE).withCategory('diagnostic'),
-        e.text('firmware_capabilities', ea.STATE_GET).withCategory('diagnostic')
-            .withDescription('JSON: discovery schema, frame protocols, codec/feature masks, display format and limits'),
-        e.binary('firmware_legacy', ea.STATE_GET, true, false).withCategory('diagnostic'),
-        e.numeric('frame_codec', ea.STATE).withCategory('diagnostic'),
-        e.enum('test_image', ea.SET, ['zigbee', 'inverted']).withDescription('Send a complete demo image through the frame protocol'),
-        e.text('frame', ea.SET).withDescription('4096-byte framebuffer as base64, or MQTT object {data, request_id}: 256x128, row-lsb, 1=white'),
-        e.text('frame_status', ea.STATE).withDescription('displayed only after CRC and LCD completion are confirmed'),
-        e.text('frame_error', ea.STATE).withDescription('Last transfer error; cleared when a transfer starts'),
+        e.enum('test_image', ea.SET, ['zigbee', 'inverted'])
+            .withDescription('Replace the screen with a demo image; restore your layout from GTag Display in HA'),
+        e.text('frame_status', ea.STATE).withCategory('diagnostic')
+            .withDescription('displayed only after CRC and LCD completion are confirmed'),
+        e.text('frame_error', ea.STATE).withCategory('diagnostic'),
+        // Discovery marker required by released HA integrations. Keep until a
+        // coordinated migration; publication alone does not advertise support.
         e.text('frame_request_id', ea.STATE).withCategory('diagnostic')
-            .withDescription('Echo of the optional MQTT frame request ID; used by the GTag HA integration'),
-        e.numeric('frame_id', ea.STATE), e.text('frame_crc32', ea.STATE),
-        e.numeric('frame_bytes', ea.STATE).withUnit('B'),
-        e.numeric('frame_transfer_ms', ea.STATE).withUnit('ms'),
-        e.numeric('frame_retries', ea.STATE),
-        e.numeric('frame_freshness_timeout', ea.STATE).withUnit('s').withCategory('diagnostic'),
-        e.text('frame_freshness', ea.SET).withDescription('Confirm the current frame: {frame_id, crc, sequence, request_id}'),
+            .withDescription('Compatibility marker for GTag HA discovery; not a user setting'),
+        e.numeric('frame_transfer_ms', ea.STATE).withUnit('ms').withCategory('diagnostic'),
         e.binary('frame_stale', ea.STATE_GET, true, false).withCategory('diagnostic')
-            .withDescription('The physical LCD currently shows the stale-data icon; read on demand'),
-        e.numeric('frame_stale_frame_id', ea.STATE).withCategory('diagnostic'),
-        e.text('freshness_request_id', ea.STATE).withCategory('diagnostic'),
-        e.text('freshness_status', ea.STATE).withCategory('diagnostic'),
-        e.text('freshness_error', ea.STATE).withCategory('diagnostic'),
-        e.numeric('freshness_frame_id', ea.STATE).withCategory('diagnostic'),
-        e.text('freshness_crc32', ea.STATE).withCategory('diagnostic'),
-        e.numeric('freshness_sequence', ea.STATE).withCategory('diagnostic'),
-        e.text('power_diagnostics', ea.STATE_GET).withCategory('diagnostic')
-            .withDescription('Explicit power-debug snapshot; requires zigbee_power_diagnostics firmware option'),
+            .withDescription('Read the physical stale-data icon state; does not refresh the image'),
+        e.enum('check_connection', ea.SET, ['check'])
+            .withDescription('Request a fresh reply from this display; leaves the image and freshness timer unchanged'),
+        e.enum('connection_status', ea.STATE, ['checking', 'ok', 'error']).withCategory('diagnostic'),
+        e.text('connection_error', ea.STATE).withCategory('diagnostic'),
+        e.text('connection_checked_at', ea.STATE).withCategory('diagnostic'),
     ],
     };
 }

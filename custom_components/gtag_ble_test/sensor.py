@@ -9,10 +9,29 @@ from .entity import GTagEntity
 async def async_setup_entry(hass, entry, async_add_entities):
     entities = [
         LastUpdate(entry.runtime_data), TransferStatus(entry.runtime_data), FirmwareVersion(entry.runtime_data),
+        ConnectionStatus(entry.runtime_data),
     ]
     if entry.runtime_data.battery.supported is not False:
         entities.append(BatteryVoltage(entry.runtime_data))
     async_add_entities(entities)
+
+
+class ConnectionStatus(GTagEntity, SensorEntity):
+    _attr_translation_key = "connection_check"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["not_checked", "checking", "ok", "error"]
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, display):
+        super().__init__(display, "connection_check")
+
+    @property
+    def native_value(self):
+        return self.display.connection_check.status
+
+    @property
+    def extra_state_attributes(self):
+        return self.display.connection_check.attributes()
 
 
 class FirmwareVersion(GTagEntity, SensorEntity):

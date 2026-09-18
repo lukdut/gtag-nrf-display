@@ -259,7 +259,7 @@ async def test_options_saved_while_unloaded_apply_on_next_load(hass, loaded, sen
 
 async def test_russian_options_translations_are_loaded(hass, loaded):
     values = await translation.async_get_translations(hass, "ru", "options", {DOMAIN})
-    assert values[f"component.{DOMAIN}.options.step.init.title"] == "Макет экрана"
+    assert values[f"component.{DOMAIN}.options.step.init.title"] == "Настройки устройства"
     assert "{preview}" in values[f"component.{DOMAIN}.options.step.preview.description"]
     assert "{minimum}" in values[f"component.{DOMAIN}.options.error.stale_after_too_short"]
     assert "Знаков после запятой" in values[f"component.{DOMAIN}.options.step.values.data.decimals_1"]

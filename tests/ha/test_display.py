@@ -152,7 +152,7 @@ async def test_full_integration_entities_and_draw_action(hass, entry, sent):
     assert descriptions[DOMAIN]["draw"]["fields"]["device_id"]["required"]
     registry = er.async_get(hass)
     entities = er.async_entries_for_config_entry(registry, entry.entry_id)
-    assert len(entities) == 10
+    assert len(entities) == 12
     image_id = registry.async_get_entity_id("image", DOMAIN, f"{entry.data['address']}_preview")
     assert hass.states.get(image_id).state == "unavailable"
     device = dr.async_get(hass).async_get(entities[0].device_id)

@@ -1,3 +1,13 @@
+check_connection:
+  name: Check connection
+  description: Request a fresh reply from the device. The result is shown in Connection check and can be returned to automations. Does not update the image or its freshness timer.
+  fields:
+    device_id:
+      name: Display
+      required: true
+      selector:
+        device:
+          integration: gtag_ble_test
 draw:
   name: Draw screen
   description: Render and send a 256x128 screen. Replaces the clock screen; nearby requests are combined.

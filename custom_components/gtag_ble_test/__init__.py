@@ -23,7 +23,7 @@ DRAW_SCHEMA = LAYOUT_SCHEMA.extend({
 
 
 async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
-    async def draw(call: ServiceCall) -> dict:
+    def selected_display(call: ServiceCall) -> Display:
         device = dr.async_get(hass).async_get(call.data["device_id"])
         if device is None:
             raise ServiceValidationError("GTag display device not found")
@@ -32,15 +32,25 @@ async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
             if entry is not None and entry.domain == DOMAIN:
                 display = getattr(entry, "runtime_data", None)
                 if isinstance(display, Display):
-                    return await display.async_draw(
-                        {"background": call.data["background"], "elements": call.data["elements"]},
-                        force=call.data["force"],
-                        auto_update=call.data["auto_update"],
-                    )
+                    return display
         raise ServiceValidationError("The selected GTag display is not loaded")
+
+    async def draw(call: ServiceCall) -> dict:
+        return await selected_display(call).async_draw(
+            {"background": call.data["background"], "elements": call.data["elements"]},
+            force=call.data["force"], auto_update=call.data["auto_update"],
+        )
+
+    async def check_connection(call: ServiceCall) -> dict:
+        return await selected_display(call).connection_check.async_run()
 
     hass.services.async_register(
         DOMAIN, "draw", draw, schema=DRAW_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN, "check_connection", check_connection,
+        schema=vol.Schema({vol.Required("device_id"): cv.string}),
         supports_response=SupportsResponse.OPTIONAL,
     )
     return True
