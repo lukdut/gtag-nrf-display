@@ -407,6 +407,35 @@ class DisplayTests(unittest.TestCase):
         fw.firmware_run(0)
         self.assertEqual(words(), reference)
 
+    def test_remapped_gpio_preserves_lcd_protocol_on_both_ports(self):
+        reference = reference_words(ROOT / "esp32-diagram/ESP32-gtag.sal")
+        raw = bytes(word & 255 for word in reference[-4096:])
+        for assignment in ((2, 3, 4, 5, 28), (32, 47, 34, 37, 31), (36, 11, 45, 38, 2)):
+            with self.subTest(assignment=assignment):
+                fw.firmware_create_with_pins(0, 1000, *assignment)
+                fw.firmware_run(4000)
+                fw.firmware_connect()
+                begin(raw)
+                self.assertEqual(commit(), 1)
+                fw.firmware_disconnect()
+                fw.firmware_run(0)
+                self.assertEqual(words(), reference)
+                self.assertEqual(fw.firmware_reset_high() - fw.firmware_reset_low(), 50)
+                self.assertEqual(fw.firmware_battery_mv(), 4200)
+
+    def test_all_external_adc_inputs_and_remapping_without_battery(self):
+        for pin in (2, 3, 4, 5, 28, 29, 30, 31):
+            with self.subTest(pin=pin):
+                fw.firmware_create_with_pins(0, 1000, 11, 36, 38, 45, pin)
+                fw.firmware_run(1100)
+                self.assertEqual(fw.firmware_adc_reads(), 1)
+                self.assertEqual(fw.firmware_battery_mv(), 4200)
+        # A pin normally used for ADC can drive the LCD when measurement is off.
+        fw_without_battery.firmware_create_with_pins(1, 1000, 31, 30, 29, 28, 31)
+        fw_without_battery.firmware_run(4000)
+        self.assertEqual(fw_without_battery.firmware_adc_reads(), 0)
+        self.assertEqual(fw_without_battery.firmware_frames(), 1)
+
 
 class ZigbeeDisplayTests(unittest.TestCase):
     """Exercise the shared driver without BLE; radio/ZCL need hardware testing."""
@@ -428,6 +457,18 @@ class ZigbeeDisplayTests(unittest.TestCase):
             data = struct.pack('<BIH', 2, session, offset) + encoded.payload[offset:offset + 32]
             self.assertEqual(self.packet(data)[2], 0)
         return self.packet(struct.pack('<BI', 3, session))
+
+    def test_remapped_zigbee_pins_deliver_the_same_lcd_bytes(self):
+        fw_zigbee.firmware_create_with_pins(0, 1000, 6, 8, 15, 17, 4)
+        fw_zigbee.firmware_run(4000)
+        raw = bytes(range(256)) * 16
+        self.send_frame(raw)
+        fw_zigbee.firmware_run(0)
+        shown = bytes(fw_zigbee.firmware_word(i) & 255 for i in
+                      range(fw_zigbee.firmware_words() - 4096, fw_zigbee.firmware_words()))
+        self.assertEqual(shown, raw)
+        self.assertEqual(fw_zigbee.firmware_battery_mv(), 4200)
+        self.assertEqual(fw_zigbee.firmware_advertising(), 0)
 
     def test_full_frame_crc_and_lcd_confirmation_are_separate(self):
         fw_zigbee.firmware_run(4000)

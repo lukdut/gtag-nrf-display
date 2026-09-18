@@ -238,6 +238,101 @@ async def test_two_displays_do_not_share_confirmations(hass, transport, broker):
         await second.async_close()
 
 
+async def test_two_displays_keep_freshness_and_offline_state_separate(hass, transport, broker):
+    second_entry = make_entry(hass, SECOND, "second")
+    broker.retained["zigbee2mqtt/bridge/devices"].append(inventory(SECOND, "second"))
+    second = ZigbeeTransport(hass, second_entry, lambda: None)
+    await second.async_setup()
+    try:
+        # Even equal frame IDs/CRCs/sequences cannot acknowledge another screen.
+        first_task = asyncio.create_task(transport.async_confirm(42, 123, 1))
+        second_task = asyncio.create_task(second.async_confirm(42, 123, 1))
+        await asyncio.sleep(0)
+        first_data, second_data = [message[1]["frame_freshness"] for message in broker.messages[-2:]]
+        def confirmation(data):
+            return {"freshness_status": "confirmed", "freshness_request_id": data["request_id"],
+                    "freshness_frame_id": 42, "freshness_crc32": "0000007b", "freshness_sequence": 1}
+        broker.receive("zigbee2mqtt/second", confirmation(first_data))
+        await asyncio.sleep(0)
+        assert not first_task.done() and not second_task.done()
+        broker.receive("zigbee2mqtt/room/display/availability", {"state": "offline"})
+        with pytest.raises(HomeAssistantError, match="offline"):
+            await first_task
+        assert second.available and not second_task.done()
+        broker.receive("zigbee2mqtt/second", confirmation(second_data))
+        await second_task
+        assert not transport.available
+    finally:
+        await second.async_close()
+
+
+async def test_two_real_devices_route_draw_battery_options_and_reload_independently(
+    hass, zigbee_entry, broker, sent,
+):
+    second_entry = make_entry(hass, SECOND, "second")
+    broker.retained["zigbee2mqtt/bridge/devices"].append(inventory(SECOND, "second"))
+    names = {IEEE: "room/display", SECOND: "second"}
+    delivered = {IEEE: [], SECOND: []}
+    async def confirm(topic, data):
+        ieee = topic.split("/")[1]
+        delivered[ieee].append(base64.b64decode(data["frame"]["data"]))
+        broker.confirm(data, name=names[ieee])
+    broker.hook = confirm
+    assert await async_setup_component(hass, DOMAIN, {})
+    await hass.async_block_till_done()
+    first, second = zigbee_entry.runtime_data, second_entry.runtime_data
+    registry = er.async_get(hass)
+    devices = dr.async_get(hass)
+    first_device = devices.async_get_device_by_identifier((DOMAIN, f"zigbee:{IEEE}"), zigbee_entry.entry_id)
+    second_device = devices.async_get_device_by_identifier((DOMAIN, f"zigbee:{SECOND}"), second_entry.entry_id)
+    assert first_device.id != second_device.id
+    for ieee, name, voltage in ((IEEE, "room/display", 4.1), (SECOND, "second", 3.7)):
+        broker.receive(f"zigbee2mqtt/{name}", {"battery_voltage_1": voltage})
+    await hass.async_block_till_done()
+    for ieee, expected in ((IEEE, "4.1"), (SECOND, "3.7")):
+        entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"zigbee:{ieee}_battery_voltage")
+        assert hass.states.get(entity_id).state == expected
+
+    async def draw(device, text):
+        return await hass.services.async_call(DOMAIN, "draw", {
+            "device_id": device.id, "force": True, "auto_update": False,
+            "elements": [{"type": "text", "x": 8, "y": 8, "text": text}],
+        }, blocking=True, return_response=True)
+    results = await asyncio.gather(draw(first_device, "FIRST"), draw(second_device, "SECOND"))
+    assert all(result["status"] == "sent" for result in results)
+    assert len(delivered[IEEE]) == len(delivered[SECOND]) == 1
+    assert delivered[IEEE][0] != delivered[SECOND][0]
+    assert first.preview != second.preview
+    second_preview = second.preview
+    second_frames = list(delivered[SECOND])
+    # Applying a different timeout/preset to the first screen leaves the second alone.
+    flow = await hass.config_entries.options.async_init(zigbee_entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {
+        "preset": "clock", "update_interval": 5, "stale_after": 5,
+    })
+    await hass.config_entries.options.async_configure(flow["flow_id"], {"action": "apply"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert first.confirmed_timeout == 300 and second.confirmed_timeout == 900
+    assert second.preview == second_preview and delivered[SECOND] == second_frames
+    assert not second_entry.options
+    assert await hass.config_entries.async_reload(zigbee_entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert second_entry.runtime_data is second and not second._closed
+    assert second.preview == second_preview and delivered[SECOND] == second_frames
+    # A radio outage/unload of one screen must not block the other's service.
+    broker.receive("zigbee2mqtt/room/display/availability", {"state": "offline"})
+    with pytest.raises(HomeAssistantError, match="offline"):
+        await draw(first_device, "OFFLINE")
+    await draw(second_device, "SECOND STILL ONLINE")
+    assert second.preview != second_preview
+    assert await hass.config_entries.async_unload(zigbee_entry.entry_id)
+    assert broker.callbacks["zigbee2mqtt/second"]
+    assert not broker.callbacks["zigbee2mqtt/room/display"]
+    await draw(second_device, "AFTER UNLOAD")
+    assert len(delivered[SECOND]) == 3
+    assert not sent  # Neither Zigbee device used BLE.
+
+
 async def test_flow_selects_transport_and_discovers_by_ieee(hass, broker, monkeypatch):
     hass.config.components.add("bluetooth")
     monkeypatch.setattr("custom_components.gtag_ble_test.async_setup_entry", AsyncMock(return_value=True))

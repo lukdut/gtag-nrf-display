@@ -1,4 +1,7 @@
 """Shared G-Tag LCD/ADC driver with BLE and experimental Zigbee profiles."""
+import re
+
+from esphome import pins
 import esphome.codegen as cg
 import esphome.config_validation as cv
 import esphome.final_validate as fv
@@ -6,6 +9,8 @@ import esphome.final_validate as fv
 from esphome.const import CONF_ID
 from esphome.core import CORE
 from esphome.components.zephyr import zephyr_add_overlay, zephyr_add_prj_conf
+from esphome.components.nrf52.const import AIN_TO_GPIO
+from esphome.components.nrf52.gpio import validate_gpio_pin
 
 DEPENDENCIES = ["nrf52"]
 CONFLICTS_WITH = [
@@ -24,6 +29,7 @@ CONF_BOOT_TEST_PATTERN = "boot_test_pattern"
 CONF_BATTERY_VOLTAGE = "battery_voltage"
 CONF_CALIBRATION = "calibration"
 CONF_TRANSPORT = "transport"
+LCD_PINS = {"dio_pin": "P0.11", "clk_pin": "P1.04", "cs_pin": "P1.06", "reset_pin": "P1.13"}
 
 ns = cg.esphome_ns.namespace("gtag_display")
 GTagDisplay = ns.class_("GTagDisplay", cg.Component)
@@ -45,6 +51,42 @@ def advertising_interval(value):
         raise cv.Invalid("advertising_interval must be between 100ms and 10240ms")
     return interval
 
+
+def gpio_number(value):
+    """Use physical nRF GPIO numbers, not board-dependent D/A aliases."""
+    if not isinstance(value, (str, int)) or isinstance(value, bool):
+        raise cv.Invalid("Use a GPIO number such as P0.11; mode and inversion are fixed by the LCD protocol")
+    if isinstance(value, str) and value.startswith("P"):
+        match = re.fullmatch(r"P([01])\.(\d{1,2})", value)
+        if not match or int(match[2]) >= (32 if match[1] == "0" else 16):
+            raise cv.Invalid("Expected P0.00..P0.31 or P1.00..P1.15")
+    number = validate_gpio_pin(value)
+    if not isinstance(number, int) or not 0 <= number <= 47:
+        raise cv.Invalid("Expected an external GPIO on nRF52840 (0..47)")
+    if number in (0, 1, 9, 10, 18):
+        raise cv.Invalid("P0.00/P0.01 (32 kHz crystal), P0.09/P0.10 (NFC), and P0.18 (RESET) are reserved")
+    return number
+
+
+def battery_pin(value):
+    number = gpio_number(value)
+    if number not in AIN_TO_GPIO.values():
+        raise cv.Invalid("Battery ADC requires P0.02..P0.05 or P0.28..P0.31")
+    return pins.internal_gpio_input_pin_number(number)
+
+
+def validate_pin_assignment(config):
+    used = {}
+    assignments = [(key, config[key], [key]) for key in LCD_PINS]
+    if CONF_BATTERY_VOLTAGE in config:
+        assignments.append(("battery_voltage.pin", config[CONF_BATTERY_VOLTAGE]["pin"], [CONF_BATTERY_VOLTAGE, "pin"]))
+    for name, number, path in assignments:
+        if number in used:
+            raise cv.Invalid(f"GPIO P{number // 32}.{number % 32:02d} is already used by {used[number]}", path)
+        used[number] = name
+    return config
+
+
 def reserve_frame_endpoint(config):
     if config[CONF_TRANSPORT] == "zigbee":
         if "zigbee_id" not in config:
@@ -63,11 +105,14 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.Optional(CONF_TX_POWER, default=0): cv.one_of(0, 4, 8, int=True),
     cv.Optional(CONF_ADVERTISING_INTERVAL, default="1s"): advertising_interval,
     cv.Optional(CONF_BOOT_TEST_PATTERN, default="none"): cv.enum(BOOT_PATTERNS, lower=True),
-    # Fixed hardware: B+ -- 1M -- P0.31/AIN7 -- 1M -- GND; 100nF to GND.
+    **{cv.Optional(key, default=value): cv.All(gpio_number, pins.internal_gpio_output_pin_number)
+       for key, value in LCD_PINS.items()},
+    # B+ -- 1M -- ADC GPIO -- 1M -- GND; 100nF from ADC GPIO to GND.
     cv.Optional(CONF_BATTERY_VOLTAGE): cv.Schema({
+        cv.Optional("pin", default="P0.31"): battery_pin,
         cv.Optional(CONF_CALIBRATION, default=1.0): cv.float_range(min=0.8, max=1.2),
     }),
-}).extend(cv.COMPONENT_SCHEMA), reserve_frame_endpoint)
+}).extend(cv.COMPONENT_SCHEMA), validate_pin_assignment, reserve_frame_endpoint)
 
 
 def validate_transport(config):
@@ -153,10 +198,13 @@ async def to_code(config):
     await cg.register_component(var, config)
     cg.add(var.set_advertising_interval(config[CONF_ADVERTISING_INTERVAL].total_milliseconds))
     cg.add(var.set_boot_pattern(config[CONF_BOOT_TEST_PATTERN]))
+    for key in LCD_PINS:
+        cg.add(getattr(var, f"set_{key}")(config[key]))
     if CONF_BATTERY_VOLTAGE in config:
         cg.add_define("USE_GTAG_BATTERY")
         zephyr_add_overlay('&adc { status = "okay"; };')
         zephyr_add_prj_conf("ADC", True)
+        cg.add(var.set_battery_pin(config[CONF_BATTERY_VOLTAGE]["pin"]))
         cg.add(var.set_battery_calibration(config[CONF_BATTERY_VOLTAGE][CONF_CALIBRATION]))
     if config[CONF_TRANSPORT] == "zigbee":
         from .zigbee_codegen import add_frame_endpoint

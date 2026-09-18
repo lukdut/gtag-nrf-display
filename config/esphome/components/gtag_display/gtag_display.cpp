@@ -35,18 +35,10 @@ static const char *const TAG = "gtag_display";
 constexpr uint32_t HALF_US = 2;
 constexpr size_t FRAME_BYTES = 4096;
 
-struct Pin {
-  const struct device *port;
-  gpio_pin_t bit;
-  const char *name;
-};
-
-const Pin PINS[] = {
-    {DEVICE_DT_GET(DT_NODELABEL(gpio0)), 11, "DIO P0.11"},
-    {DEVICE_DT_GET(DT_NODELABEL(gpio1)),  4, "CLK P1.04"},
-    {DEVICE_DT_GET(DT_NODELABEL(gpio1)),  6, "CS P1.06"},
-    {DEVICE_DT_GET(DT_NODELABEL(gpio1)), 13, "RESET P1.13"},
-};
+const char *const PIN_NAMES[] = {"DIO", "CLK", "CS", "RESET"};
+#ifdef USE_GTAG_BATTERY
+constexpr uint8_t ADC_PINS[] = {2, 3, 4, 5, 28, 29, 30, 31};
+#endif
 
 #ifndef USE_GTAG_ZIGBEE
 GTagDisplay *instance = nullptr;
@@ -566,8 +558,16 @@ void GTagDisplay::wait_(Stage next, uint32_t delay_ms) {
 
 bool GTagDisplay::configure_pins_() {
   for (unsigned i = 0; i < 4; ++i) {
-    if (!device_is_ready(PINS[i].port)) {
-      ESP_LOGE(TAG, "LCD GPIO device not ready: %s", PINS[i].name);
+    const auto pin = this->lcd_pins_[i];
+    if (pin > 47) return false;
+    for (unsigned j = 0; j < i; ++j)
+      if (pin == this->lcd_pins_[j]) return false;
+#ifdef USE_GTAG_BATTERY
+    if (pin == this->battery_pin_) return false;
+#endif
+    const auto *port = pin < 32 ? DEVICE_DT_GET(DT_NODELABEL(gpio0)) : DEVICE_DT_GET(DT_NODELABEL(gpio1));
+    if (!device_is_ready(port)) {
+      ESP_LOGE(TAG, "LCD GPIO device not ready: %s", PIN_NAMES[i]);
       return false;
     }
   }
@@ -580,7 +580,9 @@ bool GTagDisplay::configure_pins_() {
   };
 
   for (const Signal signal : order) {
-    const auto &pin = PINS[static_cast<unsigned>(signal)];
+    const auto index = static_cast<unsigned>(signal);
+    const auto pin = this->lcd_pins_[index];
+    const auto *port = pin < 32 ? DEVICE_DT_GET(DT_NODELABEL(gpio0)) : DEVICE_DT_GET(DT_NODELABEL(gpio1));
     const bool high =
         signal == Signal::CS || signal == Signal::RESET;
 
@@ -592,19 +594,19 @@ bool GTagDisplay::configure_pins_() {
       flags |= NRF_GPIO_DRIVE_S0H1;
 
     const int rc =
-        gpio_pin_configure(pin.port, pin.bit, flags);
+        gpio_pin_configure(port, pin % 32, flags);
 
     if (rc != 0) {
       ESP_LOGE(
           TAG,
           "LCD CONFIG %s failed rc=%d",
-          pin.name,
+          PIN_NAMES[index],
           rc);
 
       return false;
     }
 
-    ESP_LOGI(TAG, "LCD CONFIG %s rc=0", pin.name);
+    ESP_LOGI(TAG, "LCD CONFIG %s P%u.%02u rc=0", PIN_NAMES[index], unsigned(pin / 32), unsigned(pin % 32));
   }
 
   this->pins_configured_ = true;
@@ -612,36 +614,12 @@ bool GTagDisplay::configure_pins_() {
 }
 
 bool GTagDisplay::write_(Signal signal, bool high) {
-  switch (signal) {
-    case Signal::DIO:
-      if (high)
-        NRF_P0->OUTSET = BIT(11);
-      else
-        NRF_P0->OUTCLR = BIT(11);
-      break;
-
-    case Signal::SCLK:
-      if (high)
-        NRF_P1->OUTSET = BIT(4);
-      else
-        NRF_P1->OUTCLR = BIT(4);
-      break;
-
-    case Signal::CS:
-      if (high)
-        NRF_P1->OUTSET = BIT(6);
-      else
-        NRF_P1->OUTCLR = BIT(6);
-      break;
-
-    case Signal::RESET:
-      if (high)
-        NRF_P1->OUTSET = BIT(13);
-      else
-        NRF_P1->OUTCLR = BIT(13);
-      break;
-  }
-
+  const auto pin = this->lcd_pins_[static_cast<unsigned>(signal)];
+  auto *port = pin < 32 ? NRF_P0 : NRF_P1;
+  if (high)
+    port->OUTSET = BIT(pin % 32);
+  else
+    port->OUTCLR = BIT(pin % 32);
   return true;
 }
 
@@ -873,15 +851,22 @@ void GTagDisplay::setup_battery_() {
     ESP_LOGW(TAG, "Battery ADC unavailable");
     return;
   }
-  // Disconnect the digital input buffer and pulls; SAADC still reads AIN7.
-  int err = gpio_pin_configure(DEVICE_DT_GET(DT_NODELABEL(gpio0)), 31, GPIO_DISCONNECTED);
+  unsigned input = 0;
+  for (unsigned i = 0; i < 8; ++i)
+    if (ADC_PINS[i] == this->battery_pin_) input = NRF_SAADC_AIN0 + i;
+  if (input == 0) {
+    ESP_LOGW(TAG, "Battery pin has no SAADC input");
+    return;
+  }
+  // Disconnect the digital input buffer and pulls; SAADC still reads the pin.
+  int err = gpio_pin_configure(DEVICE_DT_GET(DT_NODELABEL(gpio0)), this->battery_pin_, GPIO_DISCONNECTED);
   struct adc_channel_cfg channel = {};
   channel.gain = ADC_GAIN_1_4;  // Internal 0.6V reference / gain = 2.4V full scale.
   channel.reference = ADC_REF_INTERNAL;
   // The 1M/1M divider has a 500k source resistance: use the longest acquisition.
   channel.acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40);
   channel.channel_id = 0;
-  channel.input_positive = NRF_SAADC_AIN7;
+  channel.input_positive = input;
   if (err == 0)
     err = adc_channel_setup(adc_dev, &channel);
   this->battery_adc_ready_ = err == 0;
@@ -1010,8 +995,8 @@ void GTagDisplay::dump_config() {
       "GTag Display; protocol-v1 codecs RAW/WHITE_RLE_V1; UUIDs 0011..0016");
 #endif
 #ifdef USE_GTAG_BATTERY
-  ESP_LOGCONFIG(TAG, "  Battery: P0.31/AIN7, 1M/1M divider, 5min, calibration=%.4f",
-                this->battery_calibration_);
+  ESP_LOGCONFIG(TAG, "  Battery: P0.%02u, 1M/1M divider, 5min, calibration=%.4f",
+                unsigned(this->battery_pin_), this->battery_calibration_);
 #else
   ESP_LOGCONFIG(TAG, "  Battery measurement disabled");
 #endif
@@ -1025,9 +1010,9 @@ void GTagDisplay::dump_config() {
                 unsigned(this->boot_pattern_));
 #endif
 
-  ESP_LOGCONFIG(
-      TAG,
-      "  LCD: DIO=P0.11 CLK=P1.04 CS=P1.06 RESET=P1.13");
+  for (unsigned i = 0; i < this->lcd_pins_.size(); ++i)
+    ESP_LOGCONFIG(TAG, "  LCD %s: P%u.%02u", PIN_NAMES[i],
+                  unsigned(this->lcd_pins_[i] / 32), unsigned(this->lcd_pins_[i] % 32));
 
   ESP_LOGCONFIG(
       TAG,

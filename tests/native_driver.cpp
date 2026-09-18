@@ -36,7 +36,8 @@ static void run_until(uint64_t end_us) {
 }
 
 extern "C" {
-void firmware_create(unsigned pattern, unsigned interval) {
+void firmware_create_with_pins(unsigned pattern, unsigned interval, unsigned dio, unsigned clk,
+                               unsigned cs, unsigned reset, unsigned battery_pin) {
   display.reset();
   sim::now_us = sim::loop_calls = sim::adv_attempts = sim::adv_failures = 0;
   sim::advertising = sim::connected = false;
@@ -47,10 +48,22 @@ void firmware_create(unsigned pattern, unsigned interval) {
   sim::adc_reads = 0;
   sim::adc_raw = 3584;
   sim::adc_error = 0;
+  sim::lcd_pins = {{dio, clk, cs, reset}};
+  sim::adc_pin = battery_pin;
   display = std::make_unique<TestDisplay>();
   display->set_boot_pattern(static_cast<BootPattern>(pattern));
   display->set_advertising_interval(interval);
+  display->set_dio_pin(dio);
+  display->set_clk_pin(clk);
+  display->set_cs_pin(cs);
+  display->set_reset_pin(reset);
+#ifdef USE_GTAG_BATTERY
+  display->set_battery_pin(battery_pin);
+#endif
   display->setup();
+}
+void firmware_create(unsigned pattern, unsigned interval) {
+  firmware_create_with_pins(pattern, interval, 11, 36, 38, 45, 31);
 }
 void firmware_run(unsigned ms) { run_until(sim::now_us + uint64_t(ms) * 1000); }
 void firmware_set_time(unsigned ms) { sim::now_us = uint64_t(ms) * 1000; }

@@ -2,6 +2,7 @@
 // Host model of the scheduler, radio and GPIO. The real driver is compiled
 // unchanged; this model does not measure hardware timing or radio power.
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -27,14 +28,18 @@ inline std::function<void()> on_disable;
 inline unsigned adc_reads = 0;
 inline int adc_error = 0;
 inline int16_t adc_raw = 3584;  // 2.1V ADC input -> 4.2V battery.
+inline std::array<unsigned, 4> lcd_pins{{11, 36, 38, 45}};
+inline unsigned adc_pin = 31;
 
 inline void pin(unsigned port, unsigned bit, bool value) {
+  const unsigned number = port * 32 + bit;
+  assert(std::find(lcd_pins.begin(), lcd_pins.end(), number) != lcd_pins.end());
   const bool old = levels[port][bit];
   levels[port][bit] = value;
   if (old == value) return;
-  if (port == 1 && bit == 13) {
+  if (number == lcd_pins[3]) {
     (value ? reset_high : reset_low) = now_us;
-  } else if (port == 1 && bit == 6) {
+  } else if (number == lcd_pins[2]) {
     if (!value) {
       assert(!advertising && !connected);
       bit_count = word = 0;
@@ -44,8 +49,8 @@ inline void pin(unsigned port, unsigned bit, bool value) {
       words.push_back({word_start, uint16_t(word)});
       bit_count = 0;
     }
-  } else if (port == 1 && bit == 4 && value && !levels[1][6]) {
-    word = (word << 1) | levels[0][11];
+  } else if (number == lcd_pins[1] && value && !levels[lcd_pins[2] / 32][lcd_pins[2] % 32]) {
+    word = (word << 1) | levels[lcd_pins[0] / 32][lcd_pins[0] % 32];
     ++bit_count;
   }
 }
@@ -104,7 +109,17 @@ using gpio_flags_t = unsigned;
 #define BIT(x) (1U << (x))
 inline bool device_is_ready(const device *) { return true; }
 inline int gpio_pin_configure(const device *dev, unsigned bit, unsigned flags) {
-  if (dev == &gpio0 && bit == 31) assert(flags == GPIO_DISCONNECTED);
+  if (flags == GPIO_DISCONNECTED) {
+    assert(dev == &gpio0 && bit == sim::adc_pin);
+    return 0;
+  }
+  const unsigned number = dev->port * 32 + bit;
+  const auto found = std::find(sim::lcd_pins.begin(), sim::lcd_pins.end(), number);
+  assert(found != sim::lcd_pins.end());
+  const auto signal = found - sim::lcd_pins.begin();
+  const unsigned expected = GPIO_INPUT | (signal >= 2 ? GPIO_OUTPUT_HIGH : GPIO_OUTPUT_LOW) |
+      (signal < 2 ? NRF_GPIO_DRIVE_S0H1 : 0);
+  assert(flags == expected);
   sim::pin(dev->port, bit, flags & GPIO_OUTPUT_HIGH);
   return 0;
 }
@@ -113,6 +128,7 @@ inline int gpio_pin_configure(const device *dev, unsigned bit, unsigned flags) {
 #define ADC_REF_INTERNAL 0
 #define ADC_ACQ_TIME_MICROSECONDS 1
 #define ADC_ACQ_TIME(unit, value) value
+#define NRF_SAADC_AIN0 1
 #define NRF_SAADC_AIN7 8
 struct adc_channel_cfg {
   int gain, reference, acquisition_time;
@@ -127,7 +143,9 @@ struct adc_sequence {
 };
 inline int adc_channel_setup(const device *dev, const adc_channel_cfg *channel) {
   assert(dev == &adc && channel->channel_id == 0);
-  assert(channel->input_positive == NRF_SAADC_AIN7);
+  const std::array<unsigned, 8> adc_pins{{2, 3, 4, 5, 28, 29, 30, 31}};
+  assert(channel->input_positive >= 1 && channel->input_positive <= 8);
+  assert(adc_pins[channel->input_positive - 1] == sim::adc_pin);
   assert(channel->acquisition_time == 40 && channel->gain == ADC_GAIN_1_4);
   assert(channel->reference == ADC_REF_INTERNAL);
   return 0;

@@ -20,6 +20,10 @@ class GTagDisplay : public Component {
  public:
   void set_advertising_interval(uint32_t ms) { advertising_interval_ms_ = ms; }
   void set_boot_pattern(BootPattern pattern) { boot_pattern_ = pattern; }
+  void set_dio_pin(uint8_t pin) { lcd_pins_[0] = pin; }
+  void set_clk_pin(uint8_t pin) { lcd_pins_[1] = pin; }
+  void set_cs_pin(uint8_t pin) { lcd_pins_[2] = pin; }
+  void set_reset_pin(uint8_t pin) { lcd_pins_[3] = pin; }
   void setup() override;
   void loop() override;
   void dump_config() override;
@@ -46,6 +50,7 @@ class GTagDisplay : public Component {
 #endif
 #ifdef USE_GTAG_BATTERY
   void set_battery_calibration(float value) { battery_calibration_ = value; }
+  void set_battery_pin(uint8_t pin) { battery_pin_ = pin; }
 #endif
 
  protected:
@@ -81,6 +86,7 @@ class GTagDisplay : public Component {
   void setup_battery_();
   void sample_battery_();
   float battery_calibration_{1.0f};
+  uint8_t battery_pin_{31};
   bool battery_adc_ready_{false};
 #endif
   std::atomic<uint16_t> battery_mv_{0xFFFF};
@@ -115,6 +121,7 @@ class GTagDisplay : public Component {
   uint32_t resets_{0};
 
   bool pins_configured_{false};
+  std::array<uint8_t, 4> lcd_pins_{{11, 36, 38, 45}};
 };
 
 }  // namespace gtag_display

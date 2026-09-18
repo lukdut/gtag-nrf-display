@@ -69,6 +69,41 @@ const verify = async (raw, frames = 1) => {
 };
 try {
     assert.equal((await lines.next()).value, 'ready');
+    await test('a stalled device does not block another device or share its transfer lock', async () => {
+        let release, entered;
+        const blocked = new Promise((resolve) => {release = resolve;});
+        const started = new Promise((resolve) => {entered = resolve;});
+        const firstStates = [], secondStates = [];
+        const first = {device: {ieeeAddr: '0xfirst', endpoints: [{
+            supportsInputCluster: () => true,
+            command: async () => {entered(); await blocked; throw new Error('First device offline');},
+        }]}, publish: (value) => firstStates.push(value)};
+        const second = {device: {ieeeAddr: '0xsecond', endpoints: [endpoint()]},
+            publish: (value) => secondStates.push(value)};
+        const raw = Buffer.alloc(4096, 255);
+        const message = (request_id) => ({data: raw.toString('base64'), request_id});
+        const waiting = frameConverter.convertSet(null, 'frame', message('first'), first);
+        const failure = assert.rejects(waiting, /First device offline/);
+        await started;
+        try {
+            await assert.rejects(frameConverter.convertSet(null, 'frame', message('duplicate'), first), /already in progress/);
+            await frameConverter.convertSet(null, 'frame', message('second'), second);
+            assert.equal(secondStates.at(-1).frame_status, 'displayed');
+            assert.equal(secondStates.at(-1).frame_request_id, 'second');
+            assert.ok(!firstStates.some((value) => value.frame_status === 'displayed'));
+            await verify(raw);
+        } finally {
+            release();
+            await failure;
+        }
+        assert.equal(firstStates.at(-1).frame_request_id, 'first');
+        assert.equal(firstStates.at(-1).frame_status, 'error');
+        // Recovered device can start a new transfer after its own failure.
+        first.device.endpoints = [endpoint()];
+        await frameConverter.convertSet(null, 'frame', message('recovered'), first);
+        assert.equal(firstStates.at(-1).frame_status, 'displayed');
+        assert.equal(secondStates.at(-1).frame_request_id, 'second');
+    });
     await test('expiry inverts pixels, short confirmation restores them, replay cannot renew', async () => {
         const ep = endpoint();
         const raw = testImage();
