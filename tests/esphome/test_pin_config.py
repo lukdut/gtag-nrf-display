@@ -4,13 +4,28 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import yaml as yaml_lib
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "config/esphome"
 
 
 class PinConfigurationTests(unittest.TestCase):
-    def run_config(self, settings="", *, profile="ble", extra="", generate=False):
+    def run_config(self, settings="", *, profile="ble", extra="", generate=False, omit=()):
+        config = dict(dio_pin="P0.11", clk_pin="P1.04", cs_pin="P1.06", reset_pin="P1.13",
+                      battery_voltage=dict(enabled=True, pin="P0.31", calibration=1.0,
+                                           empty_voltage="3.306V", full_voltage="4.19V", recovery_voltage="3.45V"))
+        for key, value in (yaml_lib.safe_load(settings) or {}).items():
+            if key == "battery_voltage" and isinstance(value, dict):
+                config[key].update(value)
+            else:
+                config[key] = value
+        for key in omit:
+            if key.startswith("battery_voltage."):
+                del config["battery_voltage"][key.split(".")[1]]
+            else:
+                del config[key]
+        settings = "\n".join("  " + line for line in yaml_lib.safe_dump(config).splitlines())
         with tempfile.TemporaryDirectory(prefix="gtag-pin-config-") as temporary:
             folder = Path(temporary)
             yaml = folder / "device.yaml"
@@ -60,6 +75,19 @@ gtag_display:
                                        ("reset_pin", 17), ("battery_pin", 4)):
                     self.assertIn(f"->set_{setter}({number});", code)
 
+    def test_hardware_settings_are_required(self):
+        for key in ("dio_pin", "clk_pin", "cs_pin", "reset_pin", "battery_voltage", "battery_voltage.enabled",
+                    "battery_voltage.pin", "battery_voltage.calibration", "battery_voltage.empty_voltage",
+                    "battery_voltage.full_voltage", "battery_voltage.recovery_voltage"):
+            with self.subTest(key=key):
+                result, _ = self.run_config(omit=(key,))
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("required option", result.stdout)
+        for recovery in ("3.306V", "3.0V", "4.2V"):
+            result, _ = self.run_config(f"  battery_voltage:\n    recovery_voltage: {recovery}")
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("recovery_voltage must", result.stdout)
+
     def test_invalid_assignments_are_rejected(self):
         cases = [
             ("  clk_pin: P0.11", "already used by dio_pin"),
@@ -103,13 +131,26 @@ gtag_display:
 
     def test_disabling_battery_frees_adc_pin_for_lcd(self):
         result, code = self.run_config("""  dio_pin: P0.31
-  battery_voltage: !remove
+  battery_voltage:
+    enabled: false
 """, generate=True)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("->set_dio_pin(31);", code)
         self.assertNotIn("->set_battery_pin(", code)
         self.assertNotIn("->set_battery_indicator(", code)
         self.assertNotIn("->set_battery_voltage_range(", code)
+
+    def test_complete_documentation_example(self):
+        document = (ROOT / "docs/device-configuration.md").read_text()
+        example = document.split("```yaml\n", 1)[1].split("```", 1)[0]
+        example = example.replace("!include gtag/packages/", f"!include {CONFIG}/packages/")
+        example = example.replace("path: gtag/components", f"path: {CONFIG}/components")
+        with tempfile.TemporaryDirectory(prefix="gtag-doc-config-") as temporary:
+            path = Path(temporary) / "device.yaml"
+            path.write_text(example)
+            result = subprocess.run([sys.executable, "-m", "esphome", "config", str(path)],
+                                    text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_super52840_no_battery_endpoints_and_bootloader(self):
         with tempfile.TemporaryDirectory(prefix="gtag-super-config-") as temporary:

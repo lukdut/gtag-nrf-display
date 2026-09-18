@@ -6,6 +6,9 @@ ESPHome. Настройка одинакова для Bluetooth и Zigbee. Он�
 
 ## Настройка
 
+В текущих исходниках после beta.3 GPIO и настройки батареи обязательны.
+[Полный YAML для Device Builder](device-configuration.md).
+
 Добавьте в конфигурацию устройства блок `gtag_display` или дополните имеющийся:
 
 ```yaml
@@ -15,10 +18,15 @@ gtag_display:
   cs_pin: P1.06
   reset_pin: P1.13
   battery_voltage:
+    enabled: true
+    calibration: 1.0
+    empty_voltage: 3.306V
+    full_voltage: 4.19V
+    recovery_voltage: 3.45V
     pin: P0.31
 ```
 
-Это прежняя распиновка по умолчанию. Для другой платы замените значения на её
+Это прежняя стандартная распиновка, теперь указанная явно. Для другой платы замените значения на её
 свободные физические GPIO. Обозначения относятся к самому nRF52840, а не к
 номерам D0/D1 на плате. Допустимы строки `P0.00`…`P0.31`, `P1.00`…`P1.15`
 и целые номера: `P1.04` соответствует 36. Выводы `P0.00`/`P0.01` заняты
@@ -34,6 +42,11 @@ gtag_display:
   cs_pin: P0.15
   reset_pin: P0.17
   battery_voltage:
+    enabled: true
+    calibration: 1.0
+    empty_voltage: 3.306V
+    full_voltage: 4.19V
+    recovery_voltage: 3.45V
     pin: P0.04
 ```
 
@@ -46,11 +59,12 @@ gtag_display:
 На выбранный вывод подключается середина прежнего делителя 1 МОм / 1 МОм
 с конденсатором 100 нФ к земле. Коэффициент делителя остаётся 2;
 `battery_voltage.calibration` задаёт небольшую поправку измерения.
-В Bluetooth, если делителя нет, удалите его настройку из подключённого пакета:
+В Bluetooth, если делителя нет, укажите это явно:
 
 ```yaml
 gtag_display:
-  battery_voltage: !remove
+  battery_voltage:
+    enabled: false
 ```
 
 Для Zigbee подключите пакет **после** основного пакета:
@@ -63,7 +77,7 @@ packages:
 
 Он удаляет АЦП и датчик напряжения из Zigbee. Вариант объявляется как
 `GTag_Display_Frame_NoBat`; обновлённые конвертер и интеграция HA не создают
-для него сущность Battery voltage. Один `battery_voltage: !remove` выключает
+для него сущность Battery voltage. Один `battery_voltage: {enabled: false}` выключает
 АЦП, но оставляет шаблонный Zigbee-датчик — используйте пакет для полного отключения.
 Для опубликованной версии оба пакета можно подключить через `github://` на одном
 теге, как в [конфигурации Super52840](../config/esphome/gtag-super52840-zigbee.yaml).

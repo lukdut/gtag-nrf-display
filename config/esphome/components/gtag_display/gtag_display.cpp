@@ -1,5 +1,11 @@
 #include "gtag_display.h"
 #include "boot_logo.h"
+#ifdef USE_GTAG_BATTERY
+#include "battery_messages.h"
+#ifdef USE_GTAG_ZIGBEE
+#include "gtag_radio_gate.h"
+#endif
+#endif
 
 #include <cerrno>
 #include <cstring>
@@ -538,6 +544,12 @@ void GTagDisplay::queue_pattern_(BootPattern pattern) {
   for (size_t i = 0; i < FRAME_BYTES; ++i) {
     uint8_t value = 0xFF;
     switch (pattern) {
+      case BootPattern::LOW_BATTERY:
+      case BootPattern::BATTERY_ERROR:
+#ifdef USE_GTAG_BATTERY
+        value = pattern == BootPattern::LOW_BATTERY ? battery_messages::LOW[i] : battery_messages::ERROR[i];
+#endif
+        break;
       case BootPattern::LOGO: value = boot_logo::FRAME[i]; break;
       case BootPattern::BLACK: value = 0x00; break;
       case BootPattern::CHECKERBOARD:
@@ -822,7 +834,7 @@ void GTagDisplay::service_lcd_() {
   // A local expiry can request a redraw while BLE is advertising. Stop it
   // first, then recheck the connection flag before touching LCD/frame data.
 #ifndef USE_GTAG_ZIGBEE
-  if (this->stage_ == Stage::READY && this->frame_pending_.load() && !this->connected_.load()) {
+  if (this->bluetooth_started_ && this->stage_ == Stage::READY && this->frame_pending_.load() && !this->connected_.load()) {
     const int err = bt_le_adv_stop();
     if (err != 0 && err != -EALREADY) {
       this->set_timeout("lcd_retry", 1000, [this]() { this->enable_loop_soon_any_context(); });
@@ -916,6 +928,30 @@ void GTagDisplay::sample_battery_() {
     this->battery_mv_.store(static_cast<uint16_t>(mv + 0.5f));
     ESP_LOGI(TAG, "Battery: %u mV", unsigned(this->battery_mv()));
   }
+  if (this->battery_protection_) {
+    const auto previous = this->battery_guard_.state();
+    const auto state = this->battery_guard_.update(this->battery_mv());
+    if (state == battery_guard::State::REBOOT) {
+      // Reset the complete radio stack, then boot with radio disabled. No
+      // persistent network settings are erased. Recovery hysteresis applies
+      // on every boot, suppressing restarts from small voltage rebounds.
+      App.reboot();
+      return;
+    }
+    if (state != battery_guard::State::RUNNING) {
+      if (this->frames_ == 0 || state != previous) {
+        this->queue_pattern_(state == battery_guard::State::LOW ? BootPattern::LOW_BATTERY
+                                                               : BootPattern::BATTERY_ERROR);
+        this->enable_loop_soon_any_context();
+      }
+    } else if (previous != state) {
+      // Clear the warning when charging has restored a usable voltage.
+      if (previous == battery_guard::State::LOW || this->frames_ > 0)
+        this->queue_pattern_(this->boot_pattern_ == BootPattern::NONE ? BootPattern::WHITE : this->boot_pattern_);
+      this->start_radio_();
+      this->enable_loop_soon_any_context();
+    }
+  }
   this->battery_bar_.update(this->battery_mv());
   const int pixels = this->battery_indicator_ && this->battery_overlay_allowed_.load()
       ? this->battery_bar_.pixels() : -1;
@@ -928,6 +964,28 @@ void GTagDisplay::sample_battery_() {
   this->set_timeout("battery_sample", 300000, [this]() { this->sample_battery_(); });
 }
 #endif
+
+void GTagDisplay::start_radio_() {
+#ifndef USE_GTAG_ZIGBEE
+  if (this->bluetooth_started_) return;
+  const int err = bt_enable(nullptr);
+
+  if (err != 0 && err != -EALREADY) {
+    ESP_LOGE(TAG, "bt_enable failed: %d", err);
+    this->mark_failed();
+    return;
+  }
+
+  conn_callbacks.connected = connected_cb;
+  conn_callbacks.disconnected = disconnected_cb;
+  bt_conn_cb_register(&conn_callbacks);
+
+  this->bluetooth_started_ = true;
+  this->restart_advertising_.store(true);
+#elif defined(USE_GTAG_BATTERY)
+  zigbee_radio_gate.permit();
+#endif
+}
 
 void GTagDisplay::setup() {
   k_mutex_init(&this->freshness_mutex_);
@@ -946,21 +1004,8 @@ void GTagDisplay::setup() {
 
   this->queue_pattern_(this->boot_pattern_);
 
-#ifndef USE_GTAG_ZIGBEE
-  const int err = bt_enable(nullptr);
-
-  if (err != 0 && err != -EALREADY) {
-    ESP_LOGE(TAG, "bt_enable failed: %d", err);
-    this->mark_failed();
-    return;
-  }
-
-  conn_callbacks.connected = connected_cb;
-  conn_callbacks.disconnected = disconnected_cb;
-  bt_conn_cb_register(&conn_callbacks);
-
-  this->restart_advertising_.store(true);
-#endif
+  if (this->radio_ready())
+    this->start_radio_();
 
   // Preserve the initial v36 boot wait before RESET.
   this->wait_(Stage::BOOT_WAIT, 3000);
@@ -996,7 +1041,7 @@ void GTagDisplay::loop() {
   this->service_lcd_();
 
 #ifndef USE_GTAG_ZIGBEE
-  if (this->restart_advertising_.load() &&
+  if (this->bluetooth_started_ && this->radio_ready() && this->restart_advertising_.load() &&
       !this->connected_.load() &&
       !this->frame_pending_.load() &&
       this->stage_ == Stage::READY) {

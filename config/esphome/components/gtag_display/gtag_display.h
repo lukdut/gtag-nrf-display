@@ -12,13 +12,14 @@
 #include "zigbee_protocol.h"
 #ifdef USE_GTAG_BATTERY
 #include "battery_bar.h"
+#include "battery_guard.h"
 #endif
 
 namespace esphome {
 namespace gtag_display {
 
 // Keep diagnostic values stable: the Zigbee control maps 0..3 to WHITE..STRIPES.
-enum class BootPattern : uint8_t { NONE, WHITE, BLACK, CHECKERBOARD, STRIPES, LOGO };
+enum class BootPattern : uint8_t { NONE, WHITE, BLACK, CHECKERBOARD, STRIPES, LOGO, LOW_BATTERY, BATTERY_ERROR };
 
 class GTagDisplay : public Component {
  public:
@@ -31,6 +32,14 @@ class GTagDisplay : public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
+
+  bool radio_ready() const {
+#ifdef USE_GTAG_BATTERY
+    return !battery_protection_ || battery_guard_.state() == battery_guard::State::RUNNING;
+#else
+    return true;
+#endif
+  }
 
   // GATT callbacks
   void connection_changed(bool connected);
@@ -53,6 +62,10 @@ class GTagDisplay : public Component {
   void process_zigbee_packet(const uint8_t *data, size_t len, uint8_t reply[zigbee_frame::REPLY_SIZE]);
 #endif
 #ifdef USE_GTAG_BATTERY
+  void set_battery_protection(uint16_t cutoff, uint16_t recovery) {
+    battery_protection_ = true;
+    battery_guard_.configure(cutoff, recovery);
+  }
   void set_battery_calibration(float value) { battery_calibration_ = value; }
   void set_battery_pin(uint8_t pin) { battery_pin_ = pin; }
   void set_battery_indicator(bool enabled) { battery_indicator_ = enabled; }
@@ -76,6 +89,8 @@ class GTagDisplay : public Component {
 
   // BLE
   bool start_advertising_();
+  void start_radio_();
+  bool bluetooth_started_{false};
   void queue_pattern_(BootPattern pattern);
 
   // LCD: copied from the proven LCD3-DIRECT-01/v36 behavior.
@@ -91,6 +106,8 @@ class GTagDisplay : public Component {
   void service_freshness_();
 
 #ifdef USE_GTAG_BATTERY
+  bool battery_protection_{true};
+  battery_guard::Guard battery_guard_;
   void setup_battery_();
   void sample_battery_();
   float battery_calibration_{1.0f};

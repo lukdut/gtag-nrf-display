@@ -25,7 +25,7 @@ inline bool levels[2][32] = {};
 inline unsigned bit_count = 0, word = 0;
 inline uint64_t word_start = 0;
 inline std::function<void()> on_disable;
-inline unsigned adc_reads = 0;
+inline unsigned adc_reads = 0, radio_starts = 0, reboots = 0;
 inline int adc_error = 0;
 inline int16_t adc_raw = 3584;  // 2.1V ADC input -> 4.2V battery.
 inline std::array<unsigned, 4> lcd_pins{{11, 36, 38, 45}};
@@ -82,7 +82,7 @@ class Component {
   std::map<std::string, Timer> timers;
   bool enabled = true, pending_enable = false, failed = false;
 };
-struct Application { void feed_wdt() {} };
+struct Application { void feed_wdt() {} void reboot() { ++sim::reboots; } };
 inline Application App;
 }  // namespace esphome
 
@@ -185,7 +185,7 @@ struct bt_conn_cb {
 };
 inline bt_conn_cb *callbacks = nullptr;
 inline void bt_conn_cb_register(bt_conn_cb *cb) { callbacks = cb; }
-inline int bt_enable(void *) { return 0; }
+inline int bt_enable(void *) { ++sim::radio_starts; return 0; }
 inline ssize_t bt_gatt_attr_read(bt_conn *, const bt_gatt_attr *, void *out,
                                  uint16_t len, uint16_t offset, const void *in, size_t size) {
   if (offset > size) return -1;

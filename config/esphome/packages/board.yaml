@@ -2,7 +2,6 @@
 substitutions:
   gtag_name: nrf-gtag-display
   gtag_friendly_name: NRF GTag Display
-  gtag_battery_calibration: "1.0"
 
 esphome:
   name: ${gtag_name}

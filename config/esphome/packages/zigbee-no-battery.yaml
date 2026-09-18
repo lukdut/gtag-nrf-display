@@ -2,7 +2,8 @@
 # Remove both ADC sampling and the Zigbee battery endpoint. The model tells
 # Zigbee2MQTT/HA which capabilities and endpoint numbering to use.
 gtag_display:
-  battery_voltage: !remove
+  battery_voltage:
+    enabled: false
 
 zigbee:
   model: GTag_Display_Frame_NoBat

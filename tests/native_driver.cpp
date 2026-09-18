@@ -5,12 +5,18 @@
 using namespace esphome::gtag_display;
 class TestDisplay : public GTagDisplay {
  public:
+  TestDisplay() {
+#ifdef USE_GTAG_BATTERY
+    battery_protection_ = false;  // Legacy protocol tests isolate the battery policy.
+#endif
+  }
   unsigned frames() const { return frames_; }
 };
 static std::unique_ptr<TestDisplay> display;
 
 static void run_until(uint64_t end_us) {
   for (unsigned steps = 0; steps < 1000; ++steps) {
+    if (sim::reboots) return;
     auto &timers = display->timers;
     auto next = std::min_element(timers.begin(), timers.end(),
         [](const auto &a, const auto &b) { return a.second.deadline < b.second.deadline; });
@@ -36,8 +42,9 @@ static void run_until(uint64_t end_us) {
 }
 
 extern "C" {
-void firmware_create_with_pins(unsigned pattern, unsigned interval, unsigned dio, unsigned clk,
-                               unsigned cs, unsigned reset, unsigned battery_pin) {
+static void create_display(unsigned pattern, unsigned interval, unsigned dio, unsigned clk,
+                           unsigned cs, unsigned reset, unsigned battery_pin, bool protect = false,
+                           int raw = 3584, int error = 0) {
   display.reset();
   sim::now_us = sim::loop_calls = sim::adv_attempts = sim::adv_failures = 0;
   sim::advertising = sim::connected = false;
@@ -45,9 +52,14 @@ void firmware_create_with_pins(unsigned pattern, unsigned interval, unsigned dio
   sim::words.clear();
   std::memset(sim::levels, 0, sizeof(sim::levels));
   sim::on_disable = {};
-  sim::adc_reads = 0;
-  sim::adc_raw = 3584;
-  sim::adc_error = 0;
+  sim::adc_reads = sim::reboots = sim::radio_starts = 0;
+#ifdef USE_GTAG_ZIGBEE
+#ifdef USE_GTAG_BATTERY
+  zigbee_radio_gate = {};
+#endif
+#endif
+  sim::adc_raw = raw;
+  sim::adc_error = error;
   sim::lcd_pins = {{dio, clk, cs, reset}};
   sim::adc_pin = battery_pin;
   display = std::make_unique<TestDisplay>();
@@ -58,17 +70,33 @@ void firmware_create_with_pins(unsigned pattern, unsigned interval, unsigned dio
   display->set_cs_pin(cs);
   display->set_reset_pin(reset);
 #ifdef USE_GTAG_BATTERY
+  if (protect) display->set_battery_protection(3306, 3450);
+#ifdef USE_GTAG_ZIGBEE
+  zigbee_radio_gate.request([]() { ++sim::radio_starts; });
+#endif
   display->set_battery_pin(battery_pin);
   // Existing wire-protocol tests require the unmodified source framebuffer.
-  display->set_battery_indicator(false);
+  display->set_battery_indicator(protect);
+#else
+  (void) protect;
 #endif
   display->setup();
+}
+void firmware_create_with_pins(unsigned pattern, unsigned interval, unsigned dio, unsigned clk,
+                               unsigned cs, unsigned reset, unsigned battery_pin) {
+  create_display(pattern, interval, dio, clk, cs, reset, battery_pin);
 }
 void firmware_create(unsigned pattern, unsigned interval) {
   firmware_create_with_pins(pattern, interval, 11, 36, 38, 45, 31);
 }
 void firmware_run(unsigned ms) { run_until(sim::now_us + uint64_t(ms) * 1000); }
 #ifdef USE_GTAG_BATTERY
+void firmware_create_protected(int raw, int error, unsigned pattern) {
+  create_display(pattern, 1000, 11, 36, 38, 45, 31, true, raw, error);
+}
+unsigned firmware_radio_starts() { return sim::radio_starts; }
+unsigned firmware_reboots() { return sim::reboots; }
+bool firmware_radio_ready() { return display->radio_ready(); }
 void firmware_battery_indicator(bool enabled) { display->set_battery_indicator(enabled); }
 #endif
 void firmware_set_time(unsigned ms) { sim::now_us = uint64_t(ms) * 1000; }

@@ -177,6 +177,84 @@ class BootLogoTests(unittest.TestCase):
                 self.assertEqual(variant.firmware_frames(), 1)
 
 
+class BatteryProtectionTests(unittest.TestCase):
+    def test_no_boot_pattern_stays_empty_normally_and_clears_low_warning_on_recovery(self):
+        for variant in (fw, fw_zigbee):
+            variant.firmware_create_protected(3584, 0, 0)
+            variant.firmware_run(4000)
+            self.assertEqual(variant.firmware_radio_starts(), 1)
+            self.assertEqual(variant.firmware_frames(), 0)
+            variant.firmware_create_protected(2731, 0, 0)
+            variant.firmware_run(4000)
+            self.assertEqual(variant.firmware_frames(), 1)
+            variant.firmware_adc_value(3584, 0)
+            variant.firmware_run(300000)
+            count = variant.firmware_words()
+            raw = bytes(variant.firmware_word(i) & 255 for i in range(count - 4096, count))
+            self.assertEqual(raw, bytes([255]) * 4096)
+            self.assertEqual(variant.firmware_radio_starts(), 1)
+
+    def test_low_startup_sleeps_without_radio_and_recovers_after_charging(self):
+        for variant in (fw, fw_zigbee):
+            with self.subTest(variant=variant):
+                variant.firmware_create_protected(2731, 0, 5)  # 3.200 V
+                self.assertEqual(variant.firmware_radio_starts(), 0)
+                variant.firmware_run(4000)
+                self.assertEqual(variant.firmware_radio_starts(), 0)
+                self.assertFalse(variant.firmware_radio_ready())
+                self.assertEqual(variant.firmware_frames(), 1)
+                count = variant.firmware_words()
+                warning = bytes(variant.firmware_word(i) & 255 for i in range(count - 4096, count))
+                self.assertGreater(warning.count(255), 3000)
+                self.assertGreater(sum(v != 255 for v in warning), 100)
+                # Protection has no bar/stale overlay, and does not redraw while idle.
+                self.assertEqual(warning[-96:], bytes([255]) * 96)
+                variant.firmware_run(900000)
+                self.assertEqual(variant.firmware_frames(), 1)
+                self.assertEqual(variant.firmware_radio_starts(), 0)
+                self.assertEqual(variant.firmware_reboots(), 0)
+                variant.firmware_adc_value(2901, 0)  # 3.400 V, above cutoff but below recovery
+                variant.firmware_run(300000)
+                self.assertEqual(variant.firmware_radio_starts(), 0)
+                variant.firmware_adc_value(2944, 0)  # exactly 3.450 V
+                variant.firmware_run(300000)
+                self.assertEqual(variant.firmware_radio_starts(), 1)
+                self.assertTrue(variant.firmware_radio_ready())
+                self.assertEqual(variant.firmware_frames(), 2)
+                variant.firmware_run(300000)
+                self.assertEqual(variant.firmware_radio_starts(), 1)
+
+    def test_runtime_low_requests_reset_and_next_boot_remains_off(self):
+        for variant in (fw, fw_zigbee):
+            variant.firmware_create_protected(3584, 0, 5)
+            variant.firmware_run(4000)
+            self.assertEqual(variant.firmware_radio_starts(), 1)
+            variant.firmware_adc_value(2731, 0)
+            variant.firmware_run(300000)
+            self.assertEqual(variant.firmware_reboots(), 1)
+            self.assertFalse(variant.firmware_radio_ready())
+            # Simulate reset with the same depleted battery.
+            variant.firmware_create_protected(2731, 0, 5)
+            variant.firmware_run(604000)
+            self.assertEqual(variant.firmware_radio_starts(), 0)
+            self.assertEqual(variant.firmware_reboots(), 0)
+            self.assertEqual(variant.firmware_frames(), 1)
+
+    def test_invalid_adc_at_boot_blocks_radio_but_runtime_error_does_not_reboot(self):
+        for variant in (fw, fw_zigbee):
+            variant.firmware_create_protected(0, -5, 5)
+            variant.firmware_run(4000)
+            self.assertEqual(variant.firmware_radio_starts(), 0)
+            self.assertEqual(variant.firmware_frames(), 1)
+            variant.firmware_adc_value(3584, 0)
+            variant.firmware_run(300000)
+            self.assertEqual(variant.firmware_radio_starts(), 1)
+            variant.firmware_adc_value(0, -5)
+            variant.firmware_run(300000)
+            self.assertEqual(variant.firmware_reboots(), 0)
+            self.assertTrue(variant.firmware_radio_ready())
+
+
 class DisplayTests(unittest.TestCase):
     def setUp(self):
         start()
