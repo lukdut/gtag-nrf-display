@@ -19,6 +19,7 @@ from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_TRANSPORT, DOMAIN, SERVICE_UUID, TRANSPORT_BLE, TRANSPORT_ZIGBEE
+from .firmware_flow import FirmwareWizardMixin
 from .layouts import (
     DECIMAL_PLACES, DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, StaleAfterTooShort,
     async_render_layout, normalize_saved_timing, preset_layout,
@@ -29,7 +30,7 @@ from .render import clock_layout, preview_svg
 _LOGGER = logging.getLogger(__name__)
 
 
-class GTagBLETestConfigFlow(ConfigFlow, domain=DOMAIN):
+class GTagBLETestConfigFlow(FirmwareWizardMixin, ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     @staticmethod
@@ -74,7 +75,7 @@ class GTagBLETestConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="user", menu_options=["ble", "zigbee"])
+        return self.async_show_menu(step_id="user", menu_options=["ble", "zigbee", "firmware"])
 
     async def async_step_zigbee(
         self, user_input: dict[str, Any] | None = None

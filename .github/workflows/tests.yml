@@ -42,7 +42,12 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: tests/zigbee/package-lock.json
+          cache-dependency-path: |
+            tests/zigbee/package-lock.json
+            tests/frontend/package-lock.json
+      - run: npm ci --prefix tests/frontend --ignore-scripts --no-audit --no-fund
+      - name: HA translations and download link rendering
+        run: npm test --prefix tests/frontend
       - run: npm ci --prefix tests/zigbee --ignore-scripts --no-audit --no-fund
       - name: Zigbee converter and firmware interoperability
         run: npm test --prefix tests/zigbee

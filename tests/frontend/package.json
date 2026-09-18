@@ -1,0 +1,11 @@
+{
+  "name": "gtag-frontend-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node --test translations.test.mjs"},
+  "devDependencies": {
+    "intl-messageformat": "11.2.15",
+    "marked": "18.0.12",
+    "xss": "1.0.15"
+  }
+}

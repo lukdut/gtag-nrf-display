@@ -1,6 +1,7 @@
 """Run using Python with ESPHome 2026.9.0 installed; no SDK or radio required."""
 from pathlib import Path
 from contextlib import contextmanager
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -42,6 +43,47 @@ def public_packages():
 
 
 class PinConfigurationTests(unittest.TestCase):
+    def test_firmware_wizard_yaml_matches_esphome(self):
+        # Load the pure generator without importing the HA integration on the
+        # ESPHome Python version. Validate its real output, including package
+        # merging, bootloader selection and disabled-battery endpoints.
+        spec = importlib.util.spec_from_file_location(
+            "firmware_config", ROOT / "custom_components/gtag_ble_test/firmware_config.py",
+        )
+        wizard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wizard)
+        with public_packages() as folder:
+            for board, transport in (("promicro", "ble"), ("promicro", "zigbee"), ("super52840", "zigbee")):
+                for battery in (False, True):
+                    with self.subTest(board=board, transport=transport, battery=battery):
+                        settings = {
+                            **wizard.hardware_defaults(board), "board": board, "transport": transport,
+                            "name": "gtag-kitchen", "friendly_name": 'Экран "кухни": #1',
+                            "battery_enabled": battery,
+                            "dio_pin": "P0.06", "clk_pin": "P0.08", "cs_pin": "P0.15", "reset_pin": "P0.17",
+                            "battery_pin": "P0.04", "calibration": 0.955,
+                            "empty_voltage": 3.2, "full_voltage": 4.19, "recovery_voltage": 3.4, "indicator": False,
+                        }
+                        rendered = wizard.render_firmware_yaml(settings)
+                        path = folder / "device.yaml"
+                        # Override build_path through a wrapper, preserving the
+                        # generated YAML as the complete device configuration.
+                        (folder / "generated.yaml").write_text(localize_packages(rendered, folder))
+                        path.write_text(f"packages:\n  device: !include generated.yaml\nesphome:\n  build_path: {folder / 'build'}\n")
+                        result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
+                                                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+                        self.assertEqual(result.returncode, 0, result.stdout)
+                        code = (folder / "build/src/main.cpp").read_text()
+                        self.assertIn("sd140_v7" if board == "super52840" else "sd140_v6", code)
+                        for field, pin in (("dio_pin", 6), ("clk_pin", 8), ("cs_pin", 15), ("reset_pin", 17)):
+                            self.assertIn(f"->set_{field}({pin});", code)
+                        self.assertEqual("->set_battery_pin(4);" in code, battery)
+                        if battery:
+                            self.assertIn("->set_battery_voltage_range(3200, 4190);", code)
+                            self.assertIn("->set_battery_protection(3200, 3400);", code)
+                        if transport == "zigbee":
+                            self.assertIn("GTag_Display_Frame_V1" if battery else "GTag_Display_Frame_NoBat", code)
+
     def test_public_release_configurations(self):
         with public_packages() as folder:
             for profile in ("ble", "zigbee", "super52840-zigbee"):

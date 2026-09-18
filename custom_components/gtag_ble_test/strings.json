@@ -7,10 +7,11 @@
         "description": "Add the G-Tag display connected through nRF52840."
       },
       "user": {
-        "title": "Connection type",
+        "title": "Add a display or prepare firmware",
         "menu_options": {
           "ble": "Bluetooth",
-          "zigbee": "Zigbee2MQTT"
+          "zigbee": "Zigbee2MQTT",
+          "firmware": "Prepare firmware (ESPHome YAML)"
         }
       },
       "ble": {
@@ -31,19 +32,81 @@
         "data": {
           "address": "Device"
         }
+      },
+      "firmware": {
+        "title": "Prepare firmware",
+        "description": "Prepare a YAML configuration for ESPHome Device Builder 2026.9.0. Select the profile matching your board and bootloader. Compile and download the UF2 in ESPHome.",
+        "data": {
+          "board": "Board and bootloader",
+          "transport": "Connection type",
+          "name": "ESPHome configuration name",
+          "friendly_name": "Friendly name"
+        },
+        "data_description": {
+          "name": "A unique name for each display: 1–31 lowercase letters, digits or hyphens; no leading or trailing hyphen.",
+          "board": "Pro Micro / Super Mini: nice!nano S140 6.x bootloader. Super52840: stock XIAO S140 7.x, currently Zigbee only."
+        }
+      },
+      "firmware_pins": {
+        "title": "Display wiring",
+        "description": "Check every GPIO against your wiring. Use P0.11 or P1.04 notation. Keep LCD power, common GND and the original DisplayCLK/S1 clock connected. Enable battery measurement only with an external 1 MΩ / 1 MΩ divider.",
+        "data": {
+          "dio_pin": "DIO",
+          "clk_pin": "CLK",
+          "cs_pin": "CS",
+          "reset_pin": "RESET",
+          "battery_enabled": "Measure battery through an external divider"
+        }
+      },
+      "firmware_battery": {
+        "title": "Battery",
+        "description": "LiPo 1S up to 4.2 V, external 1 MΩ / 1 MΩ divider and 100 nF from the ADC input to GND. This profile does not support the built-in Super52840 divider. Charge is checked every five minutes while the radio is off.",
+        "data": {
+          "battery_pin": "ADC input",
+          "calibration": "Voltage calibration",
+          "empty_voltage": "0% and radio-off threshold",
+          "full_voltage": "100% charge",
+          "recovery_voltage": "Startup and recovery threshold",
+          "indicator": "Show the bottom battery bar"
+        },
+        "data_description": {
+          "calibration": "Multimeter correction factor; start with 1.0, allowed range 0.8–1.2.",
+          "recovery_voltage": "Above the radio-off threshold and at most the 100% voltage. This threshold also applies at every power-on."
+        }
+      },
+      "firmware_download": {
+        "title": "Configuration ready",
+        "description": "{download_link_start}Download {filename}{download_link_end}\n\nFirmware: **{firmware_tag}**. Use the link above to download. Submit performs the selected action; finishing shows the link again on the final screen and keeps it available for 20 minutes.\n\nCreate a configuration in ESPHome Device Builder and paste the YAML from the file. Select **Install → Manual download**, download the UF2 and copy it to the board bootloader drive. Zigbee also needs the converter from the same release. Then add the flashed display in GTag Display through Bluetooth or Zigbee2MQTT.\n\nYou can also copy the YAML:\n\n```yaml\n{yaml}\n```",
+        "data": {
+          "action": "Next step"
+        }
       }
     },
     "abort": {
       "already_configured": "Already configured.",
       "no_devices_found": "No GTag BLE devices found.",
-      "bluetooth_not_ready": "Bluetooth is unavailable. Check its setup in Home Assistant."
+      "bluetooth_not_ready": "Bluetooth is unavailable. Check its setup in Home Assistant.",
+      "firmware_ready": "Configuration ready.\n\n{download_link_start}Download {filename}{download_link_end}\n\nClick the link to save the YAML. It is valid for 20 minutes after finishing the wizard (until HA restarts). Compile the firmware in ESPHome Device Builder, then add the flashed display in GTag Display."
     },
     "error": {
       "invalid_topic": "Enter a base topic without leading/trailing slashes, + or #.",
       "mqtt_not_ready": "Set up the MQTT integration in Home Assistant first.",
       "cannot_connect": "No device inventory received. Check MQTT, Zigbee2MQTT and the base topic.",
       "no_zigbee_devices": "No new GTag displays found. Check pairing and Frame_V1 firmware.",
-      "converter_update_required": "Update the gtag-display.mjs external converter in Zigbee2MQTT from this package."
+      "converter_update_required": "Update the gtag-display.mjs external converter in Zigbee2MQTT from this package.",
+      "invalid_board": "Select a supported board.",
+      "invalid_transport": "Select Bluetooth or Zigbee.",
+      "unsupported_profile": "Only Zigbee is currently available for Super52840.",
+      "invalid_device_name": "Use 1–31 lowercase letters, digits or hyphens; no leading or trailing hyphen.",
+      "invalid_friendly_name": "Enter 1–80 characters without line breaks or ESPHome substitutions.",
+      "invalid_gpio": "Use P0.00…P0.31 or P1.00…P1.15.",
+      "reserved_gpio": "This pin is reserved for the crystal, NFC or board reset.",
+      "duplicate_gpio": "This GPIO is already used by another display signal.",
+      "invalid_adc_gpio": "The ADC supports only P0.02…P0.05 and P0.28…P0.31.",
+      "invalid_settings": "Check the allowed value range.",
+      "invalid_full_voltage": "The 100% threshold must exceed the 0% threshold by at least 1 mV.",
+      "invalid_recovery_voltage": "Recovery must be above the 0% threshold and at most the 100% threshold.",
+      "firmware_download_unavailable": "Unable to create the download link. Copy the YAML below or refresh the link."
     }
   },
   "options": {
@@ -124,6 +187,25 @@
         "4": "4",
         "5": "5",
         "6": "6"
+      }
+    },
+    "firmware_board": {
+      "options": {
+        "promicro": "Pro Micro / Super Mini / nice!nano — S140 6.x",
+        "super52840": "Super52840 — XIAO S140 7.x bootloader"
+      }
+    },
+    "firmware_transport": {
+      "options": {
+        "ble": "Bluetooth",
+        "zigbee": "Zigbee2MQTT"
+      }
+    },
+    "firmware_action": {
+      "options": {
+        "finish": "Finish and show the download link",
+        "edit": "Edit settings",
+        "refresh": "Refresh download link"
       }
     }
   },

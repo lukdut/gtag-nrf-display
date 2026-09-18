@@ -19,10 +19,11 @@
         "description": "Добавить экран G-Tag, подключённый через nRF52840."
       },
       "user": {
-        "title": "Способ подключения",
+        "title": "Добавить экран или подготовить прошивку",
         "menu_options": {
           "ble": "Bluetooth",
-          "zigbee": "Zigbee2MQTT"
+          "zigbee": "Zigbee2MQTT",
+          "firmware": "Подготовить прошивку (YAML для ESPHome)"
         }
       },
       "ble": {
@@ -43,19 +44,81 @@
         "data": {
           "address": "Устройство"
         }
+      },
+      "firmware": {
+        "title": "Подготовить прошивку",
+        "description": "Мастер подготовит YAML для ESPHome Device Builder 2026.9.0. Выберите профиль, соответствующий плате и её загрузчику. Сборка и скачивание UF2 выполняются в ESPHome.",
+        "data": {
+          "board": "Плата и загрузчик",
+          "transport": "Способ связи",
+          "name": "Имя конфигурации ESPHome",
+          "friendly_name": "Отображаемое имя"
+        },
+        "data_description": {
+          "name": "Уникальное имя для каждого экрана: 1–31 символ, строчные латинские буквы, цифры и дефисы; без дефиса в начале и конце.",
+          "board": "Pro Micro / Super Mini: загрузчик nice!nano S140 6.x. Super52840: штатный XIAO S140 7.x, пока только Zigbee."
+        }
+      },
+      "firmware_pins": {
+        "title": "Подключение экрана",
+        "description": "Сверьте каждый GPIO со своей проводкой. Формат: P0.11 или P1.04. Питание LCD, общая GND и штатное тактирование DisplayCLK/S1 должны быть сохранены. Включайте измерение батареи только при наличии внешнего делителя 1 МОм / 1 МОм.",
+        "data": {
+          "dio_pin": "DIO",
+          "clk_pin": "CLK",
+          "cs_pin": "CS",
+          "reset_pin": "RESET",
+          "battery_enabled": "Измерять аккумулятор через внешний делитель"
+        }
+      },
+      "firmware_battery": {
+        "title": "Аккумулятор",
+        "description": "LiPo 1S до 4,2 В, внешний делитель 1 МОм / 1 МОм и 100 нФ от входа АЦП к GND. Встроенный делитель Super52840 этим профилем не поддерживается. Заряд после отключения радио проверяется раз в пять минут.",
+        "data": {
+          "battery_pin": "Вход АЦП",
+          "calibration": "Калибровка напряжения",
+          "empty_voltage": "0% и порог отключения радио",
+          "full_voltage": "100% заряда",
+          "recovery_voltage": "Порог включения после зарядки",
+          "indicator": "Показывать нижнюю полоску заряда"
+        },
+        "data_description": {
+          "calibration": "Поправка по мультиметру; начальное значение 1.0, допустимо 0.8–1.2.",
+          "recovery_voltage": "Выше порога отключения и не выше 100%. Этот порог применяется и при каждом включении питания."
+        }
+      },
+      "firmware_download": {
+        "title": "Конфигурация готова",
+        "description": "{download_link_start}Скачать {filename}{download_link_end}\n\nПрошивка: **{firmware_tag}**. Для скачивания нажмите ссылку выше. Кнопка Submit выполняет выбранное действие; при завершении ссылка появится ещё раз на итоговом экране и будет доступна 20 минут.\n\nВ ESPHome Device Builder создайте конфигурацию и вставьте YAML из файла. Выберите **Install → Manual download**, скачайте UF2 и скопируйте его на диск загрузчика платы. Для Zigbee нужен конвертер из того же релиза. Затем добавьте прошитый экран в GTag Display через Bluetooth или Zigbee2MQTT.\n\nМожно также скопировать YAML:\n\n```yaml\n{yaml}\n```",
+        "data": {
+          "action": "Дальше"
+        }
       }
     },
     "abort": {
       "already_configured": "Устройство уже настроено.",
       "no_devices_found": "Устройства GTag BLE не найдены.",
-      "bluetooth_not_ready": "Bluetooth недоступен. Проверьте его настройку в Home Assistant."
+      "bluetooth_not_ready": "Bluetooth недоступен. Проверьте его настройку в Home Assistant.",
+      "firmware_ready": "Конфигурация готова.\n\n{download_link_start}Скачать {filename}{download_link_end}\n\nНажмите ссылку, чтобы сохранить YAML. Она действует 20 минут после завершения мастера (до перезапуска HA). Затем соберите прошивку в ESPHome Device Builder и добавьте прошитый экран в GTag Display."
     },
     "error": {
       "invalid_topic": "Укажите базовый топик без начального/конечного слеша, + и #.",
       "mqtt_not_ready": "Сначала настройте интеграцию MQTT в Home Assistant.",
       "cannot_connect": "Не получен список устройств. Проверьте MQTT, Zigbee2MQTT и базовый топик.",
       "no_zigbee_devices": "Новых GTag-экранов не найдено. Проверьте сопряжение и прошивку Frame_V1.",
-      "converter_update_required": "Обновите внешний конвертер gtag-display.mjs в Zigbee2MQTT из этого комплекта."
+      "converter_update_required": "Обновите внешний конвертер gtag-display.mjs в Zigbee2MQTT из этого комплекта.",
+      "invalid_board": "Выберите поддерживаемую плату.",
+      "invalid_transport": "Выберите Bluetooth или Zigbee.",
+      "unsupported_profile": "Для Super52840 пока доступен только Zigbee.",
+      "invalid_device_name": "Нужно 1–31 строчных латинских букв, цифр или дефисов; без дефиса в начале и конце.",
+      "invalid_friendly_name": "Введите 1–80 символов без переносов строк и подстановок ESPHome.",
+      "invalid_gpio": "Укажите GPIO в формате P0.00…P0.31 или P1.00…P1.15.",
+      "reserved_gpio": "Этот вывод зарезервирован под кварц, NFC или Reset платы.",
+      "duplicate_gpio": "Этот GPIO уже занят другим сигналом экрана.",
+      "invalid_adc_gpio": "АЦП поддерживает только P0.02…P0.05 и P0.28…P0.31.",
+      "invalid_settings": "Проверьте допустимый диапазон значения.",
+      "invalid_full_voltage": "Порог 100% должен быть выше порога 0% минимум на 1 мВ.",
+      "invalid_recovery_voltage": "Порог восстановления должен быть выше порога 0% и не выше порога 100%.",
+      "firmware_download_unavailable": "Не удалось создать ссылку. Скопируйте YAML ниже или обновите ссылку."
     }
   },
   "options": {
@@ -136,6 +199,25 @@
         "4": "4",
         "5": "5",
         "6": "6"
+      }
+    },
+    "firmware_board": {
+      "options": {
+        "promicro": "Pro Micro / Super Mini / nice!nano — S140 6.x",
+        "super52840": "Super52840 — загрузчик XIAO S140 7.x"
+      }
+    },
+    "firmware_transport": {
+      "options": {
+        "ble": "Bluetooth",
+        "zigbee": "Zigbee2MQTT"
+      }
+    },
+    "firmware_action": {
+      "options": {
+        "finish": "Завершить и показать ссылку на файл",
+        "edit": "Изменить параметры",
+        "refresh": "Обновить ссылку"
       }
     }
   }
