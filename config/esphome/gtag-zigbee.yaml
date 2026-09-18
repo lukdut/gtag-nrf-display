@@ -6,7 +6,7 @@ substitutions:
   gtag_battery_calibration: "1.0"
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v0.9.0-beta.2
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v0.9.0-beta.3
 
 # Optional GPIO overrides (physical nRF52840 pin names; defaults shown):
 # gtag_display:
@@ -17,4 +17,4 @@ packages:
 #   battery_voltage:
 #     pin: P0.31
 # To omit ADC sampling and battery entities, add to packages above:
-#   no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v0.9.0-beta.2
+#   no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v0.9.0-beta.3

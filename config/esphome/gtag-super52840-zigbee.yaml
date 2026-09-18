@@ -1,10 +1,10 @@
 # Super52840 with stock XIAO S140 v7 bootloader; no battery measurement.
-# Copy into ESPHome Device Builder 2026.9.0 or newer AFTER beta.2 is published.
+# Copy into ESPHome Device Builder 2026.9.0 or newer AFTER beta.3 is published.
 substitutions:
   gtag_name: nrf-gtag-super52840
   gtag_friendly_name: GTag Super52840
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v0.9.0-beta.2
-  board: github://lukdut/gtag-nrf-display/config/esphome/packages/super52840.yaml@v0.9.0-beta.2
-  no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v0.9.0-beta.2
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v0.9.0-beta.3
+  board: github://lukdut/gtag-nrf-display/config/esphome/packages/super52840.yaml@v0.9.0-beta.3
+  no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v0.9.0-beta.3

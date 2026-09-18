@@ -16,8 +16,8 @@ EmberZNet: получены подтверждения CRC и завершени
 между опросами. Пользователь измерил около **50 мкА** в спящем режиме,
 со всплесками до **0,4 мА** и редкими до **3 мА**.
 
-Zigbee входит в бета-версию **0.9.0-beta.1**, стабильный v0.8.0 поддерживает BLE.
-[Интеграция 0.9.0-beta.1](zigbee-home-assistant.md) добавляет Zigbee в общий
+Zigbee входит в бета-версию **0.9.0-beta.3**, стабильный v0.8.0 поддерживает BLE.
+[Интеграция 0.9.0-beta.3](zigbee-home-assistant.md) добавляет Zigbee в общий
 редактор GTag Display. Прямое управление прототипом также доступно через
 Zigbee2MQTT; существующую BLE-запись в HA удалять не нужно.
 
@@ -64,7 +64,7 @@ substitutions:
   gtag_battery_calibration: "1.0"
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v0.9.0-beta.1
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v0.9.0-beta.3
 ```
 
 Выберите **Install → Manual download → UF2**. Пакет и компонент загружаются

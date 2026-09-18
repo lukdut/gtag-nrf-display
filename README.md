@@ -13,7 +13,7 @@ nRF52840 Pro Micro / nice!nano. Home Assistant передаёт кадр чер�
 | Zigbee2MQTT, Super52840 без измерения напряжения | [gtag-super52840-zigbee.yaml](config/esphome/gtag-super52840-zigbee.yaml) | [nrf-gtag-super52840-zigbee.yaml](config/esphome/nrf-gtag-super52840-zigbee.yaml) |
 
 Интеграция HA находится в [custom_components/gtag_ble_test](custom_components/gtag_ble_test).
-В подготовленной версии 0.9.0-beta.2 добавлен [автономный значок устаревания](docs/freshness.md)
+В версии 0.9.0-beta.3 добавлен [автономный значок устаревания](docs/freshness.md)
 для обоих транспортов с настройкой срока в HA.
 Её техническое имя сохранено для совместимости с уже добавленными устройствами
 и идентификаторами сущностей; в интерфейсе она называется **GTag Display**.
@@ -34,7 +34,7 @@ GitHub автоматически. Готовый UF2 и архив ручной
 [Пошаговая установка](docs/installation.md).
 
 В стабильном релизе v0.8.0 поддерживается **Bluetooth**. Бета-версия
-**0.9.0-beta.1** добавляет [Zigbee2MQTT в общий редактор HA](docs/zigbee-home-assistant.md):
+**0.9.0-beta.3** добавляет [Zigbee2MQTT в общий редактор HA](docs/zigbee-home-assistant.md):
 способ связи выбирается при добавлении экрана, макеты и предпросмотр общие.
 Для Zigbee2MQTT подготовлен
 [экспериментальный профиль](docs/zigbee-prototype.md): пользователь подтвердил
@@ -45,12 +45,12 @@ Zigbee2MQTT с подтверждением CRC и записи LCD. В спящ
 измерил около **50 мкА**, со всплесками до **0,4 мА** и редкими до **3 мА**;
 передача двух тестовых кадров заняла 18–33 секунды. Сборка без диагностики
 проверена после 10 и 5 минут простоя: кадры дошли за 35,225 и 16,399 секунды,
-без повторов. [Установка беты через HACS и файлы выпуска](docs/releases/0.9.0-beta.1.md).
+без повторов. [Установка беты через HACS и файлы выпуска](docs/releases/0.9.0-beta.3.md).
 [План развития и поддерживаемые установки HA](docs/roadmap.md).
 
 ## Подключение
 
-Ниже указана распиновка по умолчанию. В готовящейся beta.2 выводы можно
+Ниже указана распиновка по умолчанию. В beta.3 выводы можно
 [переназначить в YAML ESPHome](docs/pin-remapping.md), включая вход аккумулятора.
 
 | Сигнал LCD | GPIO nRF52840 |
@@ -119,19 +119,24 @@ substitutions:
   gtag_battery_calibration: "1.0"
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.9.0-beta.1
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.9.0-beta.3
 ```
 
 Для Zigbee замените `packages/ble.yaml` на `packages/zigbee.yaml` либо скопируйте
 [готовую конфигурацию](config/esphome/gtag-zigbee.yaml). Установите
 [внешний конвертер Zigbee2MQTT](zigbee2mqtt/gtag-display.mjs).
 
-Если делитель аккумулятора не установлен, добавьте:
+Если делитель аккумулятора не установлен, для BLE добавьте:
 
 ```yaml
 gtag_display:
   battery_voltage: !remove
 ```
+
+Для Zigbee подключите после основного пакета
+`github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v0.9.0-beta.3`.
+Это также уберёт датчик напряжения из Zigbee2MQTT и HA.
+Пример — в [настройке GPIO](docs/pin-remapping.md).
 
 Соберите прошивку, скачайте UF2 и скопируйте его на USB-диск загрузчика платы.
 Менять YAML для настройки содержимого экрана не нужно: это делается в HA.
