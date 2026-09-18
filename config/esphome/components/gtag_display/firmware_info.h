@@ -8,7 +8,7 @@ namespace esphome::gtag_display::firmware_info {
 // Firmware version is independent of the HA integration and ESPHome versions.
 // Bump for every published firmware; capabilities, not version comparisons,
 // decide which packets a host may send.
-inline constexpr char VERSION[] = "0.9.0-dev.1";
+inline constexpr char VERSION[] = "0.9.0";
 constexpr uint8_t SCHEMA = 1;
 constexpr uint8_t ZIGBEE_OPCODE = 7;
 constexpr size_t SIZE = 40;

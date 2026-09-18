@@ -1,5 +1,8 @@
 """Run using Python with ESPHome 2026.9.0 installed; no SDK or radio required."""
 from pathlib import Path
+from contextlib import contextmanager
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,7 +13,59 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "config/esphome"
 
 
+def localize_packages(text, folder):
+    """Resolve our pinned GitHub packages against the candidate checkout."""
+    return re.sub(
+        r"github://lukdut/gtag-nrf-display/config/esphome/packages/([^@\s]+)@[^\s]+",
+        lambda match: f"!include {folder}/packages/{match[1]}", text,
+    )
+
+
+@contextmanager
+def public_packages():
+    # Preserve the public YAML and package contents; substitute only source
+    # locations so a candidate tag can be checked before publishing it.
+    with tempfile.TemporaryDirectory(prefix="gtag-public-config-") as temporary:
+        folder = Path(temporary)
+        shutil.copytree(CONFIG / "packages", folder / "packages")
+        for profile in ("ble", "zigbee"):
+            package = folder / "packages" / f"{profile}.yaml"
+            text, count = re.subn(
+                r"      type: git\n      url: https://github.com/lukdut/gtag-nrf-display.git\n"
+                r"      ref: [^\n]+\n      path: config/esphome/components\n",
+                f"      type: local\n      path: {CONFIG / 'components'}\n", package.read_text(),
+            )
+            if count != 1:
+                raise AssertionError(f"Unexpected public component source in {package.name}")
+            package.write_text(text)
+        yield folder
+
+
 class PinConfigurationTests(unittest.TestCase):
+    def test_public_release_configurations(self):
+        with public_packages() as folder:
+            for profile in ("ble", "zigbee", "super52840-zigbee"):
+                for battery in ((True, False) if profile != "super52840-zigbee" else (False,)):
+                    with self.subTest(profile=profile, battery=battery):
+                        text = (CONFIG / f"gtag-{profile}.yaml").read_text()
+                        if not battery and profile != "super52840-zigbee":
+                            text = re.sub(r"  battery_voltage:\n(?:    [^\n]*\n)+",
+                                          "  battery_voltage:\n    enabled: false\n", text)
+                            if profile == "zigbee":
+                                # Insert after the main package, just as documented.
+                                text = re.sub(r"(  gtag: [^\n]+\n)",
+                                              r"\1  no_battery: !include " + str(folder / "packages/zigbee-no-battery.yaml") + "\n", text)
+                        path = folder / "device.yaml"
+                        path.write_text(localize_packages(text, folder) + f"\nesphome:\n  build_path: {folder / 'build'}\n")
+                        result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
+                                                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+                        self.assertEqual(result.returncode, 0, result.stdout)
+                        defines = (folder / "build/src/esphome/core/defines.h").read_text()
+                        self.assertEqual("#define USE_GTAG_BATTERY" in defines, battery)
+                        if profile != "ble":
+                            code = (folder / "build/src/main.cpp").read_text()
+                            self.assertIn("GTag_Display_Frame_V1" if battery else "GTag_Display_Frame_NoBat", code)
+
     def run_config(self, settings="", *, profile="ble", extra="", generate=False, omit=()):
         config = dict(dio_pin="P0.11", clk_pin="P1.04", cs_pin="P1.06", reset_pin="P1.13",
                       battery_voltage=dict(enabled=True, pin="P0.31", calibration=1.0,
@@ -143,11 +198,9 @@ gtag_display:
     def test_complete_documentation_example(self):
         document = (ROOT / "docs/device-configuration.md").read_text()
         example = document.split("```yaml\n", 1)[1].split("```", 1)[0]
-        example = example.replace("!include gtag/packages/", f"!include {CONFIG}/packages/")
-        example = example.replace("path: gtag/components", f"path: {CONFIG}/components")
-        with tempfile.TemporaryDirectory(prefix="gtag-doc-config-") as temporary:
-            path = Path(temporary) / "device.yaml"
-            path.write_text(example)
+        with public_packages() as folder:
+            path = folder / "device.yaml"
+            path.write_text(localize_packages(example, folder))
             result = subprocess.run([sys.executable, "-m", "esphome", "config", str(path)],
                                     text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout)

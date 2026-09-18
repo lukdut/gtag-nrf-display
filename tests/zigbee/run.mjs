@@ -75,7 +75,7 @@ try {
         });
         const raw = Buffer.alloc(4096, 255);
         const first = await transferFrame(rawOnly, raw, {sleep: noSleep});
-        assert.equal(first.info.firmware_version, '0.9.0-dev.1');
+        assert.equal(first.info.firmware_version, '0.9.0');
         assert.equal(first.info.features, 15);
         assert.equal(first.codec, 0);
         assert.equal(first.bytes, 4096);

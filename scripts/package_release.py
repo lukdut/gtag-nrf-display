@@ -2,6 +2,7 @@
 """Complete the release bundle after packaging both firmware profiles."""
 from hashlib import sha256
 from pathlib import Path
+import shutil
 
 from package import main as package_integration
 from package_firmware import validate_uf2
@@ -11,11 +12,13 @@ ARTIFACTS = (
     "gtag-display-esphome.zip", "gtag-zigbee-esphome.zip",
     "gtag-ble.yaml", "gtag-zigbee.yaml", "gtag-display.mjs",
     "gtag-super52840-zigbee.uf2", "gtag-super52840-zigbee-esphome.zip", "gtag-super52840-zigbee.yaml",
+    "LICENSE",
 )
 
 
 def main() -> None:
     dist = Path(__file__).resolve().parents[1] / "dist"
+    shutil.copyfile(dist.parent / "LICENSE", dist / "LICENSE")
     for name in ARTIFACTS[1:]:
         if not (dist / name).is_file():
             raise SystemExit(f"Missing release artifact: {name}")

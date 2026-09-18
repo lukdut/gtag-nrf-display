@@ -1,22 +1,13 @@
 # Полная конфигурация устройства в ESPHome Device Builder
 
-Этот пример относится к текущим исходникам **после v0.9.0-beta.3**.
-Опубликованные конфигурации `gtag-*.yaml` пока закреплены за beta.3:
-в ней ещё нет защиты от разряда и обязательных параметров батареи.
-До следующего релиза используйте локальные исходники, как описано ниже.
+Пример для стабильной **0.9.0**, ESPHome Device Builder **2026.9.0**.
+Параметры аппаратуры применяются после сборки и прошивки; содержимое экрана
+настраивается в интеграции GTag Display в HA.
 
-В HA нужен ESPHome Device Builder 2026.9.0. Параметры аппаратуры задаются
-в YAML ESPHome и применяются после сборки и прошивки. Содержимое экрана
-по-прежнему настраивается в интеграции GTag Display в HA.
-
-1. Скопируйте содержимое `config/esphome/` из этой версии проекта в
-   `/config/esphome/gtag/` на машине с Device Builder. Нужны каталоги
-   `components/gtag_display` и `packages`.
-   Вместо этого можно распаковать соответствующий `gtag-zigbee-esphome.zip`
-   из той же сборки в этот каталог: он содержит все необходимые исходники.
-2. Создайте в Device Builder файл `gtag-kitchen.yaml` следующего содержания.
-   Это пример для **Pro Micro / Super Mini с загрузчиком nice!nano S140 6.x**,
-   внешним делителем 1 МОм / 1 МОм и конденсатором 100 нФ.
+1. Создайте в Device Builder файл `gtag-kitchen.yaml`.
+2. Вставьте YAML ниже. Это **Pro Micro / Super Mini с загрузчиком nice!nano
+   S140 6.x**, внешним делителем 1 МОм / 1 МОм и конденсатором 100 нФ.
+   Пакет и компонент автоматически загрузятся с тега `v0.9.0`.
 
 ```yaml
 substitutions:
@@ -24,13 +15,7 @@ substitutions:
   gtag_friendly_name: "Экран кухни"
 
 packages:
-  gtag: !include gtag/packages/zigbee-base.yaml
-
-external_components:
-  - source:
-      type: local
-      path: gtag/components
-    components: [gtag_display]
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v0.9.0
 
 nrf52:
   board: adafruit_itsybitsy_nrf52840
@@ -61,9 +46,13 @@ gtag_display:
    Уже сопряжённое устройство после обычного обновления сохраняет сеть.
 
 Для Bluetooth замените единственную строку пакета на
-`gtag: !include gtag/packages/ble-base.yaml`. Аппаратные параметры остаются
+`gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.9.0`. Аппаратные параметры остаются
 такими же; конвертер Zigbee2MQTT в этом варианте не используется.
 Для второго устройства задайте другое `gtag_name`.
+
+Для автономной сборки распакуйте `gtag-zigbee-esphome.zip` в каталог
+ESPHome и используйте вложенный `nrf-gtag-zigbee.yaml`: он загружает тот же
+компонент из локальной папки. Для BLE есть `gtag-display-esphome.zip`.
 
 ## Обязательные параметры
 
@@ -101,8 +90,8 @@ gtag_display:
 
 ```yaml
 packages:
-  gtag: !include gtag/packages/zigbee-base.yaml
-  no_battery: !include gtag/packages/zigbee-no-battery.yaml
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v0.9.0
+  no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v0.9.0
 ```
 
 Этот пакет также убирает Zigbee-датчик и выбирает модель без батареи.

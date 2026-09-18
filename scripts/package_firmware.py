@@ -59,6 +59,7 @@ def main() -> None:
     files += sorted(p for p in (config / "components/gtag_display").iterdir()
                     if p.is_file() and p.suffix in {".py", ".h", ".cpp"})
     with ZipFile(dist / f"{name}-esphome.zip", "w", ZIP_DEFLATED) as archive:
+        archive.write(ROOT / "LICENSE", "LICENSE")
         for path in files:
             archive.write(path, path.relative_to(config))
     if args.profile == "zigbee":

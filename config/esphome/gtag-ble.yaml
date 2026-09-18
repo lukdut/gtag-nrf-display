@@ -1,19 +1,26 @@
-# Copy this file into ESPHome Device Builder; no local component folders needed.
+# ESPHome Device Builder 2026.9.0; Pro Micro / nice!nano S140 v6 bootloader.
+# Set all hardware and battery settings to match your wiring before compiling.
 substitutions:
   gtag_name: nrf-gtag-display
   gtag_friendly_name: NRF GTag Display
-  gtag_battery_calibration: "1.0"
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.9.0-beta.3
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v0.9.0
 
-# Optional GPIO overrides (physical nRF52840 pin names; defaults shown):
-# gtag_display:
-#   dio_pin: P0.11
-#   clk_pin: P1.04
-#   cs_pin: P1.06
-#   reset_pin: P1.13
-#   battery_voltage:
-#     pin: P0.31
-# If the divider is not fitted, replace battery_voltage above with:
-#   battery_voltage: !remove
+# Explicit hardware settings: physical nRF52840 GPIO names.
+gtag_display:
+  dio_pin: P0.11
+  clk_pin: P1.04
+  cs_pin: P1.06
+  reset_pin: P1.13
+  # B+ -- 1M -- P0.31 -- 1M -- GND; 100nF from P0.31 to GND.
+  battery_voltage:
+    enabled: true
+    pin: P0.31
+    calibration: 1.0
+    empty_voltage: 3.306V
+    full_voltage: 4.19V
+    recovery_voltage: 3.45V
+
+# Without the external battery divider, replace the entire battery_voltage block
+# with: {enabled: false}. Do not remove the block itself.

@@ -1,7 +1,7 @@
 {
   "domain": "gtag_ble_test",
   "name": "GTag Display",
-  "version": "0.9.0-beta.3",
+  "version": "0.9.0",
   "config_flow": true,
   "after_dependencies": [
     "bluetooth",
