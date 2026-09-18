@@ -1,0 +1,16 @@
+services:
+  homeassistant:
+    image: ${HA_IMAGE:?Set HA_IMAGE to a pinned official Home Assistant image}
+    volumes:
+      - ${GTAG_CONTAINER_CONFIG:?Use a new temporary directory}:/config
+    ports:
+      - "127.0.0.1:18123:8123"
+    environment:
+      TZ: UTC
+    stop_grace_period: 60s
+  mqtt:
+    image: eclipse-mosquitto:2.0.22
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "127.0.0.1:18883:1883"

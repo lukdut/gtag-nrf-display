@@ -1,0 +1,99 @@
+name: Container and native firmware
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - '.github/workflows/compatibility.yml'
+      - 'tests/container/**'
+      - 'custom_components/**'
+      - 'config/esphome/**'
+      - 'scripts/package*.py'
+  pull_request:
+    paths:
+      - '.github/workflows/compatibility.yml'
+      - 'tests/container/**'
+      - 'custom_components/**'
+      - 'config/esphome/**'
+      - 'scripts/package*.py'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  ha-container:
+    name: HA Container (${{ matrix.arch }})
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      HA_VERSION: "2026.9.2"
+      HA_IMAGE: ghcr.io/home-assistant/home-assistant:2026.9.2
+      EXPECTED_ARCH: ${{ matrix.arch }}
+      ARTIFACT_DIR: ${{ github.workspace }}/dist/container-check
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install the external test client (not HA dependencies)
+        run: python -m pip install -r tests/container/requirements.txt
+      - name: Clean install, MQTT, flows, downloads and container restart
+        run: bash tests/container/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ha-container-${{ matrix.arch }}
+          path: dist/container-check/
+          if-no-files-found: error
+          retention-days: 14
+
+  firmware:
+    name: Cold ESPHome build (${{ matrix.arch }})
+    needs: ha-container
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      ESPHOME_IMAGE: ghcr.io/esphome/esphome:2026.9.0
+      EXPECTED_ARCH: ${{ matrix.arch }}
+      ARTIFACT_DIR: ${{ github.workspace }}/dist/firmware-check
+      WIZARD_YAML: ${{ github.workspace }}/wizard/gtag-container-check.yaml
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install PyYAML==6.0.3
+      - uses: actions/download-artifact@v4
+        with:
+          name: ha-container-${{ matrix.arch }}
+          path: wizard
+      - name: Compile the downloaded wizard YAML on the native host without caches
+        run: bash tests/container/build_firmware.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-firmware-${{ matrix.arch }}
+          path: dist/firmware-check/
+          if-no-files-found: error
+          retention-days: 14

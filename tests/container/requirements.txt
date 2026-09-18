@@ -1,0 +1,4 @@
+# Client-side dependencies only. Never install these in the HA container.
+aiohttp==3.13.3
+paho-mqtt==2.1.0
+PyYAML==6.0.3
