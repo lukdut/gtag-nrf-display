@@ -63,7 +63,7 @@ async def apply(hass, result):
     return result
 
 
-async def test_preview_cancel_does_not_change_running_display(hass, loaded, sent):
+async def test_preview_cancel_does_not_change_running_display(hass, loaded, sent, freezer):
     display = loaded.runtime_data
     await display.async_set_clock(True)
     old_image = display.preview
@@ -74,7 +74,7 @@ async def test_preview_cancel_does_not_change_running_display(hass, loaded, sent
     assert display.clock_enabled and not loaded.options
 
 
-async def test_apply_preset_tracks_values_attributes_and_survives_reload(hass, loaded, sent):
+async def test_apply_preset_tracks_values_attributes_and_survives_reload(hass, loaded, sent, freezer):
     result = await preview(hass, loaded)
     expected_preview = result["description_placeholders"]["preview"]
     await apply(hass, result)
@@ -116,7 +116,7 @@ async def test_numeric_display_format_preserves_non_numeric_states(hass, state, 
     assert hass.states.get("sensor.value").state == state
 
 
-async def test_decimal_settings_preview_apply_updates_and_reload(hass, loaded, sent):
+async def test_decimal_settings_preview_apply_updates_and_reload(hass, loaded, sent, freezer):
     hass.states.async_set("sensor.temperature", "22.567", {"unit_of_measurement": "°C"})
     hass.states.async_set("sensor.humidity", "48.987", {"unit_of_measurement": "%"})
     result = await preview(hass, loaded, decimals_1="1", decimals_2="0")
@@ -196,7 +196,8 @@ async def test_refresh_and_edit_preview_do_not_send(hass, loaded, sent):
     hass.config_entries.options.async_abort(result["flow_id"])
 
 
-async def test_reapplying_same_preset_replaces_manual_draw(hass, loaded, sent):
+async def test_reapplying_same_preset_replaces_manual_draw(hass, loaded, sent, freezer):
+    # Both renders must show the same minute even if CI crosses a wall-clock boundary.
     await apply(hass, await preview(hass, loaded))
     first_revision = loaded.options["screen_revision"]
     manual = {"elements": [{"type": "text", "x": 8, "y": 8, "text": "Другая страница"}]}
