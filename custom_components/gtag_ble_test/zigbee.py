@@ -16,6 +16,8 @@ from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
+from .firmware_info import FirmwareInfo
+
 DISCOVERY_TIMEOUT = 10
 TRANSFER_TIMEOUT = 240
 DEFAULT_BASE_TOPIC = "zigbee2mqtt"
@@ -118,6 +120,7 @@ class ZigbeeTransport:
         self._request_id: str | None = None
         self._confirming = False
         self._lock = asyncio.Lock()
+        self.firmware_info: dict = {}
 
     @property
     def available(self) -> bool:
@@ -229,6 +232,13 @@ class ZigbeeTransport:
     @callback
     def _state(self, message) -> None:
         state = _json_object(message.payload)
+        if "firmware_capabilities" in state:
+            try:
+                value = state["firmware_capabilities"]
+                info = FirmwareInfo.from_dict(json.loads(value) if isinstance(value, str) else value)
+                self.firmware_info = info.attributes()
+            except (ValueError, TypeError):
+                self.firmware_info = {}
         if self.supported is not False and "battery_voltage_1" in state:
             value = state["battery_voltage_1"]
             valid = (isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -276,9 +286,23 @@ class ZigbeeTransport:
                     result = await pending
                 if str(result.get("frame_crc32", "")).lower() != crc:
                     raise HomeAssistantError("Zigbee framebuffer CRC confirmation mismatch")
-                if freshness_timeout and result.get("frame_freshness_timeout") != freshness_timeout:
+                effective_timeout = freshness_timeout
+                info_attributes = {}
+                if "firmware_capabilities" in result:
+                    try:
+                        value = result["firmware_capabilities"]
+                        info = FirmwareInfo.from_dict(json.loads(value) if isinstance(value, str) else value)
+                        info.validate_transfer()
+                    except (ValueError, TypeError) as err:
+                        raise HomeAssistantError(f"Invalid firmware capabilities: {err}") from err
+                    info_attributes = info.attributes()
+                    if not info.freshness:
+                        effective_timeout = 0
+                if freshness_timeout and result.get("frame_freshness_timeout") != effective_timeout:
                     raise HomeAssistantError("Update the Zigbee2MQTT converter: freshness timeout was not confirmed")
                 return {
+                    **info_attributes, "freshness_timeout": effective_timeout,
+                    "codec": result.get("frame_codec"),
                     "transport": "zigbee", "transport_mode": "zigbee2mqtt",
                     "request_id": request_id, "frame_id": result.get("frame_id"), "raw_crc32": crc,
                     "raw_size": 4096, "encoded_size": result.get("frame_bytes"),

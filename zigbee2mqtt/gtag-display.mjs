@@ -17,6 +17,56 @@ export const frameCluster = {
     }},
 };
 
+// Discovery opcode/schema are stable even when the frame protocol changes.
+export function parseFirmwareInfo(payload) {
+    const data = Buffer.from(payload ?? []);
+    if (data.length === 20 && data[0] === 1 && data[1] === 7 && data[2] === 2) {
+        return {firmware_version: null, schema: 0, protocol_min: 1, protocol_max: 1,
+            pixel_format: 1, codecs: 1, features: 0, width: 256, height: 128,
+            max_encoded_size: 4096, max_chunk_size: 32, legacy: true};
+    }
+    if (data.length < 43 || data[0] !== 1 || data[1] !== 7 || data[2] !== 0 || data[3] !== 1)
+        throw new Error('Unsupported or malformed GTag firmware-info schema; update the converter');
+    const raw = data.subarray(3);
+    const version = raw.subarray(20, 40).toString('latin1').split('\0')[0];
+    if (!/^[0-9A-Za-z][0-9A-Za-z.+_-]{0,18}$/.test(version)) throw new Error('Invalid GTag firmware version');
+    const info = {firmware_version: version, schema: raw[0], protocol_min: raw[1], protocol_max: raw[2],
+        pixel_format: raw[3], codecs: raw.readUInt32LE(4), features: raw.readUInt32LE(8),
+        width: raw.readUInt16LE(12), height: raw.readUInt16LE(14), max_encoded_size: raw.readUInt16LE(16),
+        max_chunk_size: raw.readUInt16LE(18), legacy: false};
+    if (!info.protocol_min || info.protocol_max < info.protocol_min || !info.max_chunk_size)
+        throw new Error('Invalid GTag firmware capabilities');
+    return info;
+}
+export async function readFirmwareInfo(endpoint, sleep = pause) {
+    let result;
+    for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+            result = await endpoint.command('gtagFrame', 'packet', {payload: Buffer.from([7])},
+                {disableDefaultResponse: true, timeout: 8000, sendPolicy: 'immediate'});
+            break;
+        } catch (error) {
+            if (attempt === 3) throw error;
+            await sleep(150);
+        }
+    }
+    // A timeout is not evidence of old firmware. Never silently downgrade it.
+    return parseFirmwareInfo(result?.payload);
+}
+function validateFirmwareInfo(info) {
+    if (!(info.protocol_min <= 1 && info.protocol_max >= 1))
+        throw new Error('No compatible GTag frame protocol; update the converter or firmware');
+    if (info.width !== 256 || info.height !== 128 || info.pixel_format !== 1)
+        throw new Error('Unsupported GTag display dimensions or pixel format');
+    if (!(info.codecs & 3) || !info.max_encoded_size || !info.max_chunk_size)
+        throw new Error('No compatible GTag codec or transfer limits');
+}
+const infoState = (info) => ({firmware_version: info.firmware_version,
+    firmware_capabilities: JSON.stringify(info), firmware_legacy: info.legacy,
+    firmware_codecs: ['raw', 'white_rle_v1'].filter((_, bit) => info.codecs & (1 << bit)).join(', '),
+    firmware_features: ['freshness', 'battery_voltage', 'battery_bar', 'battery_protection']
+        .filter((_, bit) => info.features & (1 << bit)).join(', ')});
+
 export function crc32(data) {
     let crc = 0xffffffff;
     for (const byte of data) {
@@ -27,7 +77,7 @@ export function crc32(data) {
 }
 
 // Same WHITE_RLE_V1 grammar as BLE. Choose raw if compression isn't smaller.
-export function encodeFrame(raw) {
+export function encodeFrame(raw, codecs = 3, maxSize = 4096) {
     if (!Buffer.isBuffer(raw) || raw.length !== 4096) throw new Error('Frame must contain exactly 4096 bytes');
     const encoded = [];
     for (let i = 0; i < raw.length;) {
@@ -42,11 +92,12 @@ export function encodeFrame(raw) {
             encoded.push(i - start - 1, ...raw.subarray(start, i));
         }
     }
-    return {
-        payload: encoded.length < raw.length ? Buffer.from(encoded) : raw,
-        codec: encoded.length < raw.length ? 1 : 0,
-        crc: crc32(raw),
-    };
+    const candidates = [];
+    if ((codecs & 1) && raw.length <= maxSize) candidates.push({payload: raw, codec: 0});
+    if ((codecs & 2) && encoded.length <= maxSize) candidates.push({payload: Buffer.from(encoded), codec: 1});
+    candidates.sort((a, b) => a.payload.length - b.payload.length);
+    if (!candidates.length) throw new Error('No supported codec can encode this frame within the device limit');
+    return {...candidates[0], crc: crc32(raw)};
 }
 
 export function decodeFrameInput(value) {
@@ -77,12 +128,17 @@ class SessionLost extends Error {}
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function transferFrame(endpoint, raw, options = {}) {
-    const freshnessTimeout = options.freshnessTimeout ?? 0;
+    let freshnessTimeout = options.freshnessTimeout ?? 0;
     if (!Number.isInteger(freshnessTimeout) || freshnessTimeout < 0 || freshnessTimeout > 86400)
         throw new Error('freshness_timeout must be an integer between 0 and 86400 seconds');
-    const encoded = encodeFrame(raw);
-    const session = options.session ?? randomBytes(4).readUInt32LE(0);
     const sleep = options.sleep ?? pause;
+    const info = await readFirmwareInfo(endpoint, sleep);
+    options.onInfo?.(info);
+    validateFirmwareInfo(info);
+    if (!(info.features & 1)) freshnessTimeout = 0;
+    const encoded = encodeFrame(raw, info.codecs, info.max_encoded_size);
+    const chunkSize = Math.min(32, info.max_chunk_size);
+    const session = options.session ?? randomBytes(4).readUInt32LE(0);
     const started = Date.now();
     const deadline = started + 180_000;
     let retries = 0;
@@ -129,15 +185,15 @@ export async function transferFrame(endpoint, raw, options = {}) {
     };
     for (let restart = 0; restart < 2; restart++) {
         try {
-            const begin = Buffer.alloc(17);
+            const begin = Buffer.alloc(info.features & 1 ? 17 : 13);
             begin[0] = 1; begin[1] = 1; begin[2] = encoded.codec;
             begin.writeUInt16LE(encoded.payload.length, 3);
             begin.writeUInt32LE(session, 5);
             begin.writeUInt32LE(encoded.crc, 9);
-            begin.writeUInt32LE(freshnessTimeout, 13);
+            if (info.features & 1) begin.writeUInt32LE(freshnessTimeout, 13);
             let status = check(await rpc(begin));
             for (let offset = status.received; offset < encoded.payload.length;) {
-                const chunk = encoded.payload.subarray(offset, offset + 32);
+                const chunk = encoded.payload.subarray(offset, offset + chunkSize);
                 const packet = Buffer.alloc(7 + chunk.length);
                 packet[0] = 2;
                 packet.writeUInt32LE(session, 1);
@@ -152,7 +208,7 @@ export async function transferFrame(endpoint, raw, options = {}) {
             // COMPLETE means decoded/verified. Wait separately for the LCD write.
             for (let poll = 0; poll <= 30; poll++) {
                 if (status.rendered && status.renderedId === session && !status.pending) {
-                    return {session, crc: encoded.crc, bytes: encoded.payload.length, retries, freshnessTimeout,
+                    return {session, crc: encoded.crc, bytes: encoded.payload.length, retries, freshnessTimeout, info, codec: encoded.codec,
                         milliseconds: Date.now() - started};
                 }
                 if (poll === 30) break;
@@ -211,6 +267,9 @@ export async function confirmFreshness(endpoint, value) {
         if (!Number.isInteger(value[name]) || value[name] < (name === 'sequence' ? 1 : 0) || value[name] > 0xffffffff)
             throw new Error(`Invalid freshness ${name}`);
     }
+    const info = await readFirmwareInfo(endpoint);
+    validateFirmwareInfo(info);
+    if (!(info.features & 1)) throw new Error('Firmware does not support freshness confirmations; send a complete frame');
     const packet = Buffer.alloc(13);
     packet[0] = 6;
     packet.writeUInt32LE(value.frame_id, 1);
@@ -310,10 +369,12 @@ export const frameConverter = {
         inFlight.add(device.ieeeAddr);
         try {
             meta.publish({frame_status: 'sending', frame_error: '', frame_request_id: requestId});
-            const result = await transferFrame(endpoint, raw, {freshnessTimeout: envelope ? value.freshness_timeout : 0});
+            const result = await transferFrame(endpoint, raw, {freshnessTimeout: envelope ? value.freshness_timeout : 0,
+                onInfo: (info) => meta.publish(infoState(info))});
             // This is a device-confirmed result. Publish even when the user
             // disables Zigbee2MQTT's optimistic state updates.
             meta.publish({
+                ...infoState(result.info), frame_codec: result.codec,
                 frame_status: 'displayed', frame_id: result.session,
                 frame_request_id: requestId, frame_error: '',
                 frame_crc32: result.crc.toString(16).padStart(8, '0'),
@@ -327,6 +388,15 @@ export const frameConverter = {
         } finally {
             inFlight.delete(device.ieeeAddr);
         }
+    },
+};
+
+export const infoConverter = {
+    key: ['firmware_version', 'firmware_capabilities', 'firmware_legacy'],
+    convertGet: async (entity, key, meta) => {
+        const endpoint = meta.device?.endpoints.find((ep) => ep.supportsInputCluster(frameCluster.ID));
+        if (!endpoint) throw new Error('GTag frame endpoint missing');
+        meta.publish(infoState(await readFirmwareInfo(endpoint)));
     },
 };
 
@@ -351,6 +421,9 @@ function definition(battery) {
     ],
     fromZigbee: [{cluster: 'gtagFrame', type: ['commandReply'], convert: (model, msg) => {
         const data = Buffer.from(msg.data?.payload ?? []);
+        if (data[1] === 7) {
+            try { return infoState(parseFirmwareInfo(data)); } catch { return {}; }
+        }
         if (data.length === 20 && data[0] === 1 && data[1] === 4 && data[2] === 0) {
             const reply = parseReply(data, 4);
             return {frame_stale: reply.stale, frame_stale_frame_id: reply.renderedId};
@@ -358,8 +431,15 @@ function definition(battery) {
         if (data.length !== 40 || data[0] !== 1 || data[1] !== 5 || data[2] !== 0 || (data[3] & ~3)) return {};
         return {power_diagnostics: JSON.stringify(parsePowerDiagnostics(data))};
     }}],
-    toZigbee: [frameConverter, powerConverter, freshnessConverter],
+    toZigbee: [frameConverter, powerConverter, freshnessConverter, infoConverter],
     exposes: [
+        e.text('firmware_version', ea.STATE_GET).withCategory('diagnostic'),
+        e.text('firmware_codecs', ea.STATE).withCategory('diagnostic'),
+        e.text('firmware_features', ea.STATE).withCategory('diagnostic'),
+        e.text('firmware_capabilities', ea.STATE_GET).withCategory('diagnostic')
+            .withDescription('JSON: discovery schema, frame protocols, codec/feature masks, display format and limits'),
+        e.binary('firmware_legacy', ea.STATE_GET, true, false).withCategory('diagnostic'),
+        e.numeric('frame_codec', ea.STATE).withCategory('diagnostic'),
         e.enum('test_image', ea.SET, ['zigbee', 'inverted']).withDescription('Send a complete demo image through the frame protocol'),
         e.text('frame', ea.SET).withDescription('4096-byte framebuffer as base64, or MQTT object {data, request_id}: 256x128, row-lsb, 1=white'),
         e.text('frame_status', ea.STATE).withDescription('displayed only after CRC and LCD completion are confirmed'),

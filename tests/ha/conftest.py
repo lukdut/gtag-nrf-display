@@ -45,6 +45,7 @@ def sent(monkeypatch):
         return Report(
             descriptor.frame_id, descriptor.raw_crc32, descriptor.codec,
             prepared.codec_name, descriptor.encoded_size, sessions=1,
+            freshness_timeout=_sender._freshness_timeout,
             last_status=f"state=complete received={descriptor.encoded_size} error=0",
         )
 

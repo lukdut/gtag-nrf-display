@@ -8,11 +8,28 @@ from .entity import GTagEntity
 
 async def async_setup_entry(hass, entry, async_add_entities):
     entities = [
-        LastUpdate(entry.runtime_data), TransferStatus(entry.runtime_data),
+        LastUpdate(entry.runtime_data), TransferStatus(entry.runtime_data), FirmwareVersion(entry.runtime_data),
     ]
     if entry.runtime_data.battery.supported is not False:
         entities.append(BatteryVoltage(entry.runtime_data))
     async_add_entities(entities)
+
+
+class FirmwareVersion(GTagEntity, SensorEntity):
+    _attr_name = "Firmware version"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, display):
+        super().__init__(display, "firmware_version")
+
+    @property
+    def native_value(self):
+        info = self.display.device_firmware_info
+        return "legacy" if info.get("firmware_legacy") else info.get("firmware_version")
+
+    @property
+    def extra_state_attributes(self):
+        return self.display.device_firmware_info
 
 
 class BatteryVoltage(GTagEntity, SensorEntity):
@@ -75,6 +92,7 @@ class TransferStatus(GTagEntity, SensorEntity):
         return {
             "transport": self.display.transport,
             "last_error": self.display.last_error, **self.display.report,
+            **self.display.device_firmware_info,
             "battery_last_read": battery.last_read,
             "battery_last_error": battery.last_error,
             "battery_firmware_supported": battery.supported,

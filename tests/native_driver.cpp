@@ -42,6 +42,13 @@ static void run_until(uint64_t end_us) {
 }
 
 extern "C" {
+void firmware_info_read(uint8_t *out) { firmware_info::make(out); }
+#ifndef USE_GTAG_ZIGBEE
+int firmware_info_gatt(uint8_t *out, uint16_t len, uint16_t offset) {
+  return read_info(nullptr, nullptr, out, len, offset);
+}
+#endif
+void firmware_info_zigbee(uint8_t *out) { firmware_info::zigbee_reply(out); }
 static void create_display(unsigned pattern, unsigned interval, unsigned dio, unsigned clk,
                            unsigned cs, unsigned reset, unsigned battery_pin, bool protect = false,
                            int raw = 3584, int error = 0) {

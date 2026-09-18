@@ -130,15 +130,19 @@ class EncodedFrame:
         return CODEC_NAMES[self.codec]
 
 
-def encode_best(raw: bytes) -> EncodedFrame:
+def encode_best(raw: bytes, supported_codecs: int = 3, max_encoded_size: int = RAW_FRAME_SIZE) -> EncodedFrame:
     """Use WHITE_RLE only when it is strictly smaller than RAW."""
     if len(raw) != RAW_FRAME_SIZE:
         raise ValueError(f"frame must be exactly {RAW_FRAME_SIZE} bytes")
 
     crc = zlib.crc32(raw) & 0xFFFFFFFF
-    compressed = white_rle_v1_encode(raw)
-
-    if len(compressed) < len(raw):
-        return EncodedFrame(CODEC_WHITE_RLE_V1, compressed, crc)
-
-    return EncodedFrame(CODEC_RAW, raw, crc)
+    candidates = []
+    if supported_codecs & (1 << CODEC_RAW) and len(raw) <= max_encoded_size:
+        candidates.append(EncodedFrame(CODEC_RAW, raw, crc))
+    if supported_codecs & (1 << CODEC_WHITE_RLE_V1):
+        compressed = white_rle_v1_encode(raw)
+        if len(compressed) <= max_encoded_size:
+            candidates.append(EncodedFrame(CODEC_WHITE_RLE_V1, compressed, crc))
+    if not candidates:
+        raise ValueError("No supported codec can encode this frame within the device limit")
+    return min(candidates, key=lambda item: len(item.payload))

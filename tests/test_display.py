@@ -802,7 +802,11 @@ class Client:
             fw.firmware_run(0)
             self.is_connected = False
 
-    async def read_gatt_char(self, _):
+    async def read_gatt_char(self, uuid):
+        if uuid == transport.INFO_CHAR_UUID:
+            out = ctypes.create_string_buffer(40)
+            fw.firmware_info_read(out)
+            return out.raw
         out = ctypes.create_string_buffer(8)
         fw.firmware_status(out)
         return out.raw
@@ -827,6 +831,94 @@ class Client:
             result = fw.firmware_led(data, len(data))
         if result < 0 and response:
             raise BleakError(f"ATT error {result}")
+
+
+class FirmwareInfoTests(unittest.TestCase):
+    def test_gatt_info_supports_small_mtu_offset_reads(self):
+        whole = ctypes.create_string_buffer(40)
+        fw.firmware_info_read(whole)
+        first, second = ctypes.create_string_buffer(22), ctypes.create_string_buffer(22)
+        self.assertEqual(fw.firmware_info_gatt(first, 22, 0), 22)
+        self.assertEqual(fw.firmware_info_gatt(second, 22, 22), 18)
+        self.assertEqual(first.raw + second.raw[:18], whole.raw)
+        self.assertEqual(fw.firmware_info_gatt(second, 22, 40), 0)
+        self.assertLess(fw.firmware_info_gatt(second, 22, 41), 0)
+
+
+    def test_actual_firmware_discovery_and_build_capabilities(self):
+        for variant, battery, chunk in ((fw, True, 18), (fw_without_battery, False, 18), (fw_zigbee, True, 32)):
+            out = ctypes.create_string_buffer(40)
+            variant.firmware_info_read(out)
+            info = transport.FirmwareInfo.parse(out.raw)
+            info.validate_transfer()
+            self.assertEqual(info.firmware_version, "0.9.0-dev.1")
+            self.assertEqual(info.codecs, 3)
+            self.assertEqual(info.features, 15 if battery else 1)
+            self.assertEqual(info.max_chunk_size, chunk)
+            self.assertFalse(info.legacy)
+            for invalid in (b"", out.raw[:39], b"\x02" + out.raw[1:]):
+                with self.assertRaises(ValueError):
+                    transport.FirmwareInfo.parse(invalid)
+
+
+class NegotiationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_raw_only_unknown_codec_bits_and_legacy(self):
+        for legacy in (False, True):
+            start()
+            class SelectedClient(Client):
+                async def read_gatt_char(self, uuid):
+                    raw = await super().read_gatt_char(uuid)
+                    if uuid == transport.INFO_CHAR_UUID:
+                        if legacy:
+                            raise BleakCharacteristicNotFoundError(uuid)
+                        raw = bytearray(raw)
+                        raw[4:8] = (0x80000001).to_bytes(4, "little")
+                        return bytes(raw)
+                    return raw
+            client = SelectedClient()
+            sender = transport.FrameSender(client.connect, "test", freshness_timeout=60)
+            report = await sender.send(bytes([255]) * 4096)
+            self.assertEqual(report.codec, 0)
+            self.assertEqual(report.encoded_size, 4096)
+            self.assertEqual(report.firmware_info.legacy, legacy)
+            self.assertEqual(report.freshness_timeout, 0 if legacy else 60)
+            self.assertEqual(fw.firmware_frames(), 1)
+
+    async def test_incompatible_protocol_and_malformed_metadata_send_no_frame(self):
+        for mode in ("protocol", "codec", "geometry", "malformed", "limit"):
+            start()
+            class SelectedClient(Client):
+                async def read_gatt_char(self, uuid):
+                    raw = await super().read_gatt_char(uuid)
+                    if uuid != transport.INFO_CHAR_UUID: return raw
+                    data = bytearray(raw)
+                    if mode == "protocol": data[1:3] = b"\x02\x02"
+                    if mode == "codec": data[4:8] = (4).to_bytes(4, "little")
+                    if mode == "geometry": data[12:14] = (128).to_bytes(2, "little")
+                    if mode == "limit": data[16:18] = (1).to_bytes(2, "little")
+                    return bytes(data[:10] if mode == "malformed" else data)
+            client = SelectedClient()
+            with self.assertRaises(HomeAssistantError):
+                await transport.FrameSender(client.connect, "test").send(bytes([255]) * 4096)
+            self.assertEqual(status().state, 0)
+            self.assertEqual(fw.firmware_frames(), 0)
+
+    async def test_service_cache_refresh_discovers_upgraded_firmware(self):
+        start()
+        class CachedClient(Client):
+            refreshed = False
+            async def clear_cache(self): self.refreshed = True
+            async def read_gatt_char(self, uuid):
+                if uuid == transport.INFO_CHAR_UUID and not self.refreshed:
+                    raise BleakCharacteristicNotFoundError(uuid)
+                return await super().read_gatt_char(uuid)
+        client = CachedClient()
+        with patch.object(transport, "RECONNECT_DELAYS", [0]):
+            result = await transport.FrameSender(client.connect, "test").send(bytes([255]) * 4096)
+        self.assertTrue(client.refreshed)
+        self.assertFalse(result.firmware_info.legacy)
+        self.assertEqual(result.codec, 1)
+        self.assertEqual(result.sessions, 2)
 
 
 class SenderTests(unittest.IsolatedAsyncioTestCase):

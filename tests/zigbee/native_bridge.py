@@ -22,8 +22,11 @@ try:
             result = {}
         elif command == 'packet':
             data = bytes.fromhex(message['hex'])
-            reply = ctypes.create_string_buffer(20)
-            fw.firmware_packet(data, len(data), reply)
+            reply = ctypes.create_string_buffer(43 if data == b"\x07" else 20)
+            if data == b"\x07":
+                fw.firmware_info_zigbee(reply)
+            else:
+                fw.firmware_packet(data, len(data), reply)
             if not hold:
                 fw.firmware_run(0)
             result = {'hex': reply.raw.hex()}

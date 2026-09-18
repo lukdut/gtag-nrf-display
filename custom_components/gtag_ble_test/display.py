@@ -60,6 +60,7 @@ class Display:
         self.last_error: str | None = None
         self.status = "idle"
         self.report: dict[str, Any] = {}
+        self.firmware_info: dict[str, Any] = {}
         self._store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self._listeners: set[Callable[[], None]] = set()
         self._clock_unsubscribe: Callable[[], None] | None = None
@@ -91,6 +92,10 @@ class Display:
 
             self.zigbee = ZigbeeTransport(hass, entry, self._notify, self._on_link_restored)
         self.battery = self.zigbee or BatteryMonitor(hass, self.address, self._notify)
+
+    @property
+    def device_firmware_info(self) -> dict:
+        return self.zigbee.firmware_info if self.zigbee is not None else self.firmware_info
 
     @property
     def update_interval(self) -> float:
@@ -194,7 +199,7 @@ class Display:
 
     @property
     def stale(self) -> bool | None:
-        if self._confirmed_at is None:
+        if self._confirmed_at is None or self.report.get("firmware_freshness_supported") is False:
             return None
         if self.confirmed_timeout == 0:
             return False
@@ -217,7 +222,7 @@ class Display:
 
     async def _confirm_unchanged(self) -> None:
         started = self.hass.loop.time()
-        if (not self.freshness_timeout or self._confirmed_at is not None
+        if (self.report.get("firmware_freshness_supported") is False or not self.freshness_timeout or self._confirmed_at is not None
                 and started - self._confirmed_at < self.freshness_timeout / 3):
             return
         self._freshness_sequence += 1
@@ -399,7 +404,7 @@ class Display:
                 try:
                     frame = await self._render(request)
                     if (not request.force and frame.raw == self._last_frame
-                            and (self.freshness_timeout or
+                            and (self.confirmed_timeout or
                                  self.hass.loop.time() - self._last_success_time < UNCHANGED_MAX_AGE)):
                         await self._confirm_unchanged()
                         self.last_error = None
@@ -422,7 +427,11 @@ class Display:
                         async with get_operation_lock(self.hass, self.address):
                             sender = FrameSender(lambda: connect(self.hass, self.address), self.address,
                                                  freshness_timeout=sent_timeout)
-                            report = await sender.send_prepared(prepared)
+                            try:
+                                report = await sender.send_prepared(prepared)
+                            finally:
+                                if sender.report is not None and sender.report.firmware_info is not None:
+                                    self.firmware_info = sender.report.firmware_info.attributes()
                         report_attributes = {"transport": TRANSPORT_BLE, **report.attributes()}
                     # Update preview only after the transport confirms this frame.
                     self.preview = frame.png
@@ -430,7 +439,7 @@ class Display:
                     self.last_success = dt_util.utcnow()
                     self._last_success_time = self.hass.loop.time()
                     self._confirmed_at = confirmation_start
-                    self.confirmed_timeout = sent_timeout
+                    self.confirmed_timeout = report_attributes.get("freshness_timeout", sent_timeout)
                     self.last_confirmation = self.last_success
                     self._freshness_sequence = 0
                     self.report = report_attributes

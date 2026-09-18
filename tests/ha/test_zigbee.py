@@ -515,3 +515,27 @@ async def test_real_ha_mqtt_client_subscription_and_publication(hass, zigbee_ent
         # The fake socket must emit the close callback that Paho normally emits.
         mqtt_client_mock.on_socket_close(mqtt_client_mock, None, SimpleNamespace(fileno=lambda: -1))
         await hass.async_block_till_done()
+
+
+async def test_firmware_metadata_and_legacy_freshness_fallback(transport, broker):
+    from dataclasses import asdict
+    from custom_components.gtag_ble_test.firmware_info import FirmwareInfo
+    for info in (FirmwareInfo('0.9.0-dev.1'), FirmwareInfo.legacy_v1()):
+        async def confirm(topic, data):
+            broker.confirm(data, firmware_capabilities=json.dumps(asdict(info)),
+                           firmware_version=info.firmware_version, frame_codec=0,
+                           frame_freshness_timeout=60 if info.freshness else 0)
+        broker.hook = confirm
+        report = await transport.async_send(b'\xff' * 4096, 60)
+        assert report['firmware_version'] == info.firmware_version
+        assert report['firmware_legacy'] == info.legacy
+        assert report['freshness_timeout'] == (60 if info.freshness else 0)
+        assert transport.firmware_info['firmware_capabilities'] == asdict(info)
+
+
+async def test_invalid_firmware_metadata_cannot_confirm_frame(transport, broker):
+    async def confirm(topic, data):
+        broker.confirm(data, firmware_capabilities='{"schema": 99}')
+    broker.hook = confirm
+    with pytest.raises(HomeAssistantError, match='Invalid firmware capabilities'):
+        await transport.async_send(b'\xff' * 4096, 60)

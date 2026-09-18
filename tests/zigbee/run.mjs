@@ -56,7 +56,7 @@ function endpoint(fault = async () => {}) {
             const result = await request('packet', {hex: packet.toString('hex')});
             const ack = Buffer.from(result.hex, 'hex');
             await fault('after', packet, ack);
-            const reply = Buffer.concat([Buffer.from([0x19, wire[1], 0x80, 20]), ack]);
+            const reply = Buffer.concat([Buffer.from([0x19, wire[1], 0x80, ack.length]), ack]);
             return Zcl.Frame.fromBuffer(frameCluster.ID, Zcl.Header.fromBuffer(reply), reply, custom).payload;
         },
     };
@@ -69,6 +69,79 @@ const verify = async (raw, frames = 1) => {
 };
 try {
     assert.equal((await lines.next()).value, 'ready');
+    await test('capabilities expose firmware version and select RAW independently per device', async () => {
+        const rawOnly = endpoint(async (phase, packet, ack) => {
+            if (phase === 'after' && packet[0] === 7) ack.writeUInt32LE(0x80000001, 7);
+        });
+        const raw = Buffer.alloc(4096, 255);
+        const first = await transferFrame(rawOnly, raw, {sleep: noSleep});
+        assert.equal(first.info.firmware_version, '0.9.0-dev.1');
+        assert.equal(first.info.features, 15);
+        assert.equal(first.codec, 0);
+        assert.equal(first.bytes, 4096);
+        await request('reset');
+        const second = await transferFrame(endpoint(), raw, {sleep: noSleep});
+        assert.equal(second.codec, 1);
+        assert.equal(second.bytes, 32);
+    });
+    await test('legacy firmware uses RAW and the original BEGIN without freshness', async () => {
+        const ep = endpoint(async (phase, packet) => {
+            if (phase === 'before' && packet[0] === 1) {
+                assert.equal(packet.length, 13); assert.equal(packet[2], 0);
+            }
+        });
+        const base = ep.command.bind(ep);
+        ep.command = async (cluster, command, payload, options) => {
+            if (payload.payload[0] === 7) {
+                const reply = Buffer.alloc(20); reply[0] = 1; reply[1] = 7; reply[2] = 2;
+                return {payload: reply};
+            }
+            return base(cluster, command, payload, options);
+        };
+        const result = await transferFrame(ep, testImage(), {freshnessTimeout: 60, sleep: noSleep});
+        assert.equal(result.info.firmware_version, null);
+        assert.equal(result.info.legacy, true);
+        assert.equal(result.freshnessTimeout, 0);
+        await verify(testImage());
+    });
+    await test('unsupported protocol/codec/schema/geometry never sends BEGIN', async () => {
+        for (const mode of ['protocol', 'codec', 'schema', 'geometry', 'limit']) {
+            let begin = false;
+            const ep = endpoint(async (phase, packet, ack) => {
+                if (phase === 'before' && packet[0] === 1) begin = true;
+                if (phase === 'after' && packet[0] === 7) {
+                    if (mode === 'protocol') {ack[4] = 2; ack[5] = 2;}
+                    if (mode === 'codec') ack.writeUInt32LE(4, 7);
+                    if (mode === 'schema') ack[3] = 2;
+                    if (mode === 'geometry') ack.writeUInt16LE(128, 15);
+                    if (mode === 'limit') ack.writeUInt16LE(1, 19);
+                }
+            });
+            await assert.rejects(transferFrame(ep, testImage(), {sleep: noSleep}), /compatible|supported|malformed/);
+            assert.equal(begin, false);
+        }
+    });
+    await test('INFO does not disturb an active frame session', async () => {
+        let checked = false;
+        const ep = endpoint(async (phase, packet) => {
+            if (phase === 'before' && packet[0] === 2 && !checked) {
+                checked = true;
+                const info = await converter.readFirmwareInfo(ep, noSleep);
+                assert.equal(info.schema, 1);
+            }
+        });
+        await transferFrame(ep, testImage(), {sleep: noSleep});
+        assert.equal(checked, true);
+        await verify(testImage());
+    });
+    await test('small advertised chunks are respected', async () => {
+        const ep = endpoint(async (phase, packet, ack) => {
+            if (phase === 'after' && packet[0] === 7) ack.writeUInt16LE(8, 21);
+            if (phase === 'before' && packet[0] === 2) assert.ok(packet.length <= 15);
+        });
+        await transferFrame(ep, Buffer.alloc(4096, 255), {sleep: noSleep});
+        await verify(Buffer.alloc(4096, 255));
+    });
     await test('a stalled device does not block another device or share its transfer lock', async () => {
         let release, entered;
         const blocked = new Promise((resolve) => {release = resolve;});
@@ -317,7 +390,7 @@ try {
     await test('malformed reply is retried', async () => {
         let malformed = false;
         const ep = endpoint(async (phase, packet, ack) => {
-            if (phase === 'after' && !malformed) {ack[0] = 99; malformed = true;}
+            if (phase === 'after' && packet[0] === 1 && !malformed) {ack[0] = 99; malformed = true;}
         });
         const result = await transferFrame(ep, testImage(), {sleep: noSleep});
         assert.equal(result.retries, 1);

@@ -19,8 +19,9 @@ from bleak_retry_connector import BleakClientWithServiceCache, establish_connect
 from homeassistant.components import bluetooth
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import CONTROL_CHAR_UUID, DOMAIN, FRAME_CHAR_UUID, LED_CHAR_UUID, STATUS_CHAR_UUID
-from .frame_codec import RAW_FRAME_SIZE
+from .const import CONTROL_CHAR_UUID, DOMAIN, FRAME_CHAR_UUID, LED_CHAR_UUID, STATUS_CHAR_UUID, INFO_CHAR_UUID
+from .firmware_info import FirmwareInfo
+from .frame_codec import RAW_FRAME_SIZE, EncodedFrame, encode_best, white_rle_v1_decode
 from .frame_protocol import ERROR_NAMES, PreparedFrame
 
 _LOGGER = logging.getLogger(__name__)
@@ -114,8 +115,13 @@ class Report:
     control_seconds: float = 0.0
     disconnect_seconds: float = 0.0
 
+    firmware_info: FirmwareInfo | None = None
+    freshness_timeout: int = 0
+
     def attributes(self) -> dict[str, Any]:
         return {
+            **(self.firmware_info.attributes() if self.firmware_info else {}),
+            "freshness_timeout": self.freshness_timeout,
             "frame_id": f"{self.frame_id:08X}",
             "raw_crc32": f"{self.expected_crc:08X}",
             "codec": self.codec,
@@ -390,16 +396,7 @@ class FrameSender:
             effective_mode="acknowledged" if self._acknowledged else "windowed_wwr",
         )
 
-        # BLE adapter for the transport-neutral BEGIN descriptor:
-        # cmd | proto | codec | encoded_size:u16 | frame_id:u32 | raw_crc:u32
-        begin = (
-            b"\x01"
-            + bytes([desc.version, desc.codec])
-            + desc.encoded_size.to_bytes(2, "little")
-            + desc.frame_id.to_bytes(4, "little")
-            + desc.raw_crc32.to_bytes(4, "little")
-            + self._freshness_timeout.to_bytes(4, "little")
-        )
+        refreshed_info_services = False
         last_error: BaseException | None = None
         try:
             async with asyncio.timeout(TOTAL_TIMEOUT_S):
@@ -413,6 +410,35 @@ class FrameSender:
                             client = await self._connect()
                         finally:
                             self.report.connect_seconds += time.monotonic() - stage_start
+                        self.report.last_operation = "FIRMWARE_INFO"
+                        try:
+                            raw_info = await self._operation(client, "FIRMWARE_INFO",
+                                                           lambda: client.read_gatt_char(INFO_CHAR_UUID))
+                        except BleakCharacteristicNotFoundError:
+                            if not refreshed_info_services and hasattr(client, "clear_cache"):
+                                await client.clear_cache()
+                                refreshed_info_services = True
+                                raise TransferResyncError("Refresh GATT services before declaring legacy firmware") from None
+                            info = FirmwareInfo.legacy_v1()
+                        else:
+                            info = FirmwareInfo.parse(bytes(raw_info))
+                        self.report.firmware_info = info
+                        info.validate_transfer(CHUNK_PAYLOAD)
+                        # Re-negotiate after each reconnect (including a firmware change).
+                        if info.codecs & (1 << desc.codec) and len(prepared.payload) <= info.max_encoded_size:
+                            selected = EncodedFrame(desc.codec, prepared.payload, desc.raw_crc32)
+                        else:
+                            raw_frame = (prepared.payload if desc.codec == 0
+                                         else white_rle_v1_decode(prepared.payload))
+                            selected = await asyncio.to_thread(encode_best, raw_frame, info.codecs, info.max_encoded_size)
+                        payload = selected.payload
+                        self.report.codec, self.report.codec_name = selected.codec, selected.codec_name
+                        self.report.encoded_size = len(payload)
+                        self.report.freshness_timeout = self._freshness_timeout if info.freshness else 0
+                        begin = (b"\x01\x01" + bytes([selected.codec]) + len(payload).to_bytes(2, "little")
+                                 + desc.frame_id.to_bytes(4, "little") + desc.raw_crc32.to_bytes(4, "little"))
+                        if info.freshness:
+                            begin += self.report.freshness_timeout.to_bytes(4, "little")
                         self._check_wwr_support(client)
                         stage_start = time.monotonic()
                         try:
@@ -478,7 +504,7 @@ class FrameSender:
             raise HomeAssistantError(
                 f"Transfer exceeded {TOTAL_TIMEOUT_S:.0f}s; "
                 f"operation={self.report.last_operation}; {self.report.last_status}") from err
-        except TransferProtocolError as err:
+        except (TransferProtocolError, ValueError) as err:
             raise HomeAssistantError(f"Frame verification/protocol error: {err}") from err
         finally:
             self.report.seconds = time.monotonic() - start

@@ -1,4 +1,5 @@
 #include "gtag_zigbee.h"
+#include "firmware_info.h"
 #ifdef USE_GTAG_ZIGBEE
 #include <cstring>
 #include "esphome/core/log.h"
@@ -64,6 +65,13 @@ zb_uint8_t GTagZigbee::handle_packet_(zb_bufid_t buffer) {
     return ZB_TRUE;
   }
 #endif
+  // Immutable discovery data can be read without changing the frame session.
+  if (valid && len == 2 && data[1] == firmware_info::ZIGBEE_OPCODE) {
+    uint8_t reply[firmware_info::ZIGBEE_SIZE];
+    firmware_info::zigbee_reply(reply);
+    send_reply_(buffer, destination, reply, sizeof(reply));
+    return ZB_TRUE;
+  }
   Phase expected = Phase::IDLE;
   if (!valid || !transport->phase_.compare_exchange_strong(expected, Phase::FILLING)) {
     uint8_t reply[zigbee_frame::REPLY_SIZE] = {};

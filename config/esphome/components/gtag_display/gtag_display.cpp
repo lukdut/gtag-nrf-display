@@ -1,5 +1,6 @@
 #include "gtag_display.h"
 #include "boot_logo.h"
+#include "firmware_info.h"
 #ifdef USE_GTAG_BATTERY
 #include "battery_messages.h"
 #ifdef USE_GTAG_ZIGBEE
@@ -63,6 +64,8 @@ GTagDisplay *instance = nullptr;
   BT_UUID_128_ENCODE(0x7a1e0014, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
 #define BT_UUID_GTAG_CONTROL_VAL \
   BT_UUID_128_ENCODE(0x7a1e0015, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
+#define BT_UUID_GTAG_INFO_VAL \
+  BT_UUID_128_ENCODE(0x7a1e0017, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
 #define BT_UUID_GTAG_BATTERY_VAL \
   BT_UUID_128_ENCODE(0x7a1e0016, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
 
@@ -72,6 +75,14 @@ GTagDisplay *instance = nullptr;
 #define BT_UUID_GTAG_STATUS BT_UUID_DECLARE_128(BT_UUID_GTAG_STATUS_VAL)
 #define BT_UUID_GTAG_CONTROL BT_UUID_DECLARE_128(BT_UUID_GTAG_CONTROL_VAL)
 #define BT_UUID_GTAG_BATTERY BT_UUID_DECLARE_128(BT_UUID_GTAG_BATTERY_VAL)
+#define BT_UUID_GTAG_INFO BT_UUID_DECLARE_128(BT_UUID_GTAG_INFO_VAL)
+
+ssize_t read_info(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                  void *buf, uint16_t len, uint16_t offset) {
+  uint8_t value[firmware_info::SIZE];
+  firmware_info::make(value);
+  return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(value));
+}
 
 ssize_t read_battery(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                     void *buf, uint16_t len, uint16_t offset) {
@@ -261,7 +272,10 @@ BT_GATT_SERVICE_DEFINE(
         BT_GATT_PERM_READ,
         read_battery,
         nullptr,
-        nullptr));
+        nullptr),
+    BT_GATT_CHARACTERISTIC(
+        BT_UUID_GTAG_INFO, BT_GATT_CHRC_READ, BT_GATT_PERM_READ,
+        read_info, nullptr, nullptr));
 
 const struct bt_data ad[] = {
     BT_DATA_BYTES(

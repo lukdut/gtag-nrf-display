@@ -152,7 +152,7 @@ async def test_full_integration_entities_and_draw_action(hass, entry, sent):
     assert descriptions[DOMAIN]["draw"]["fields"]["device_id"]["required"]
     registry = er.async_get(hass)
     entities = er.async_entries_for_config_entry(registry, entry.entry_id)
-    assert len(entities) == 9
+    assert len(entities) == 10
     image_id = registry.async_get_entity_id("image", DOMAIN, f"{entry.data['address']}_preview")
     assert hass.states.get(image_id).state == "unavailable"
     device = dr.async_get(hass).async_get(entities[0].device_id)
@@ -228,3 +228,27 @@ async def test_invalid_storage_does_not_prevent_loading(display, saved):
     await display._store.async_save(saved)
     await display.async_load()
     assert display.last_layout is None
+
+
+async def test_legacy_frame_has_no_false_freshness_confirmation(display, monkeypatch, hass):
+    from custom_components.gtag_ble_test.firmware_info import FirmwareInfo
+    from custom_components.gtag_ble_test.transport import Report
+    from custom_components.gtag_ble_test.sensor import FirmwareVersion
+
+    async def legacy_send(sender, prepared):
+        desc = prepared.descriptor
+        sender.report = Report(desc.frame_id, desc.raw_crc32, desc.codec,
+                               prepared.codec_name, desc.encoded_size,
+                               firmware_info=FirmwareInfo.legacy_v1(), freshness_timeout=0)
+        return sender.report
+
+    monkeypatch.setattr(display_module.FrameSender, 'send_prepared', legacy_send)
+    renew = AsyncMock()
+    monkeypatch.setattr(display_module, 'renew_freshness', renew)
+    await display.async_draw(layout('Legacy screen'))
+    assert display.confirmed_timeout == 0
+    assert display.stale is None
+    assert FirmwareVersion(display).native_value == 'legacy'
+    await display._confirm_unchanged()
+    renew.assert_not_awaited()
+    assert display.device_firmware_info['firmware_version'] is None
