@@ -78,6 +78,10 @@ def broker(monkeypatch):
     monkeypatch.setattr(mqtt, "async_subscribe_connection_status", fake.connection)
     monkeypatch.setattr(mqtt, "is_connected", lambda hass: True)
     monkeypatch.setattr(mqtt, "async_wait_for_mqtt_client", AsyncMock(return_value=True))
+    def subscribed(hass, topic, qos, callback):
+        callback()
+        return lambda: None
+    monkeypatch.setattr(mqtt, "async_on_subscribe_done", subscribed)
     return fake
 
 
@@ -123,6 +127,71 @@ async def test_only_matching_live_lcd_ack_confirms_frame(transport, broker):
     report = await task
     assert report["receiver_status"] == "displayed" and report["transport"] == "zigbee"
     assert transport._pending is None
+
+
+@pytest.mark.parametrize("command", ["frame", "freshness", "check"])
+@pytest.mark.parametrize("qos", [0, 1, 2])
+async def test_command_waits_for_broker_subscription_before_fast_reply(
+    hass, transport, broker, monkeypatch, command, qos,
+):
+    """At HA startup local MQTT listeners exist before broker subscriptions."""
+    from dataclasses import asdict
+    from custom_components.gtag_ble_test.firmware_info import FirmwareInfo
+    subscribed = {}
+    removed = []
+    def delayed(hass, topic, requested_qos, ready):
+        assert topic == "zigbee2mqtt/room/display"
+        subscribed[requested_qos] = ready
+        return lambda: removed.append(True)
+    monkeypatch.setattr(mqtt, "async_on_subscribe_done", delayed)
+    current = inventory()
+    current["definition"]["exposes"].append({"property": "check_connection"})
+    broker.receive("zigbee2mqtt/bridge/devices", [current])
+    async def immediate_reply(topic, data):
+        if command == "frame":
+            broker.confirm(data)
+        elif command == "freshness":
+            frame = data["frame_freshness"]
+            broker.receive("zigbee2mqtt/room/display", {
+                "freshness_status": "confirmed", "freshness_request_id": frame["request_id"],
+                "freshness_frame_id": 42, "freshness_crc32": "0000007b", "freshness_sequence": 1,
+            })
+        else:
+            broker.receive("zigbee2mqtt/room/display", {
+                "connection_status": "ok", "connection_request_id": data["check_connection"]["request_id"],
+                "firmware_capabilities": asdict(FirmwareInfo("0.9.0")),
+            })
+    broker.hook = immediate_reply
+    operations = {"frame": lambda: transport.async_send(bytes(4096)),
+                  "freshness": lambda: transport.async_confirm(42, 123, 1),
+                  "check": transport.async_check_connection}
+    task = asyncio.create_task(operations[command]())
+    try:
+        await asyncio.sleep(0)
+        assert subscribed and not broker.messages and not task.done()
+        subscribed[qos]()  # Broker SUBACK, then an immediate device response.
+        await asyncio.wait_for(task, 2)
+        assert len(broker.messages) == 1 and removed == [True] * 3
+    finally:
+        task.cancel()
+
+
+@pytest.mark.parametrize("failure", ["disconnect", "unload", "timeout"])
+async def test_subscription_wait_is_bounded_and_cleans_up(transport, broker, monkeypatch, failure):
+    removed = []
+    monkeypatch.setattr(mqtt, "async_on_subscribe_done", lambda *args: lambda: removed.append(True))
+    if failure == "timeout":
+        monkeypatch.setattr(module, "TRANSFER_TIMEOUT", 0.01)
+    task = asyncio.create_task(transport.async_send(bytes(4096)))
+    await asyncio.sleep(0)
+    if failure == "disconnect":
+        broker.connected(False)
+    elif failure == "unload":
+        await transport.async_close()
+    with pytest.raises(HomeAssistantError):
+        await asyncio.wait_for(task, 2)
+    assert not broker.messages and removed == [True] * 3
+    assert transport._pending is None and not transport._lock.locked()
 
 
 async def test_freshness_confirmation_rejects_retained_wrong_request_and_wrong_frame(transport, broker):
@@ -500,6 +569,12 @@ async def test_real_ha_mqtt_client_subscription_and_publication(hass, zigbee_ent
     task = asyncio.create_task(transport.async_send(raw))
     try:
         await hass.async_block_till_done()
+        # Complete the actual HA subscription batch and its fake socket SUBACK.
+        mqtt_mock.async_publish.assert_not_called()
+        await mqtt_mock._async_perform_subscriptions()
+        async with asyncio.timeout(2):
+            while not mqtt_mock.async_publish.called:
+                await asyncio.sleep(0.01)
         mqtt_mock.async_publish.assert_called_once()
         call = mqtt_mock.async_publish.call_args
         assert call.args[0] == f"zigbee2mqtt/{IEEE}/set"

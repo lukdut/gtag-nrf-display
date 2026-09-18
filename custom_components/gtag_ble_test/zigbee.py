@@ -294,6 +294,38 @@ class ZigbeeTransport:
                 pending.set_result(state)
         self._notify()
 
+    async def _wait_reply_subscription(self, pending: asyncio.Future) -> None:
+        """Do not send before the broker can deliver a fast, non-retained reply.
+
+        HA batches MQTT subscriptions; async_subscribe only registers a listener.
+        This matters on startup, reconnect and when Z2M renames a device.
+        Wait inside the command deadline, never inside config-entry setup (MQTT
+        may finish subscribing only after HA has finished starting).
+        """
+        ready = self.hass.loop.create_future()
+
+        @callback
+        def subscribed():
+            if not ready.done():
+                ready.set_result(None)
+
+        # HA merges listeners by topic using their highest QoS. Other MQTT
+        # entities may subscribe to this same Z2M state topic with QoS 1 or 2.
+        unsubscribers = [mqtt.async_on_subscribe_done(
+            self.hass, f"{self.base_topic}/{self.friendly_name}", qos, subscribed)
+            for qos in (0, 1, 2)]
+        try:
+            if not ready.done():
+                await asyncio.wait((ready, pending), return_when=asyncio.FIRST_COMPLETED)
+            if pending.done():
+                # Disconnect/unload must also interrupt this earlier wait.
+                pending.result()
+        finally:
+            for unsubscribe in unsubscribers:
+                unsubscribe()
+            if not ready.done():
+                ready.cancel()
+
     async def async_send(self, raw: bytes, freshness_timeout: int = 0) -> dict:
         if len(raw) != 4096:
             raise ValueError("Expected 4096 framebuffer bytes")
@@ -307,6 +339,7 @@ class ZigbeeTransport:
             started = self.hass.loop.time()
             try:
                 async with asyncio.timeout(TRANSFER_TIMEOUT):
+                    await self._wait_reply_subscription(pending)
                     await mqtt.async_publish(self.hass, f"{self.base_topic}/{self.address}/set", json.dumps({
                         "frame": {"data": base64.b64encode(raw).decode("ascii"), "request_id": request_id,
                                   "freshness_timeout": freshness_timeout},
@@ -357,6 +390,7 @@ class ZigbeeTransport:
             pending = self._pending = self.hass.loop.create_future()
             try:
                 async with asyncio.timeout(30):
+                    await self._wait_reply_subscription(pending)
                     await mqtt.async_publish(self.hass, f"{self.base_topic}/{self.address}/set", json.dumps({
                         "frame_freshness": {"frame_id": frame_id, "crc": crc, "sequence": sequence,
                                             "request_id": self._request_id},
@@ -386,6 +420,7 @@ class ZigbeeTransport:
             pending = self._check_pending = self.hass.loop.create_future()
             try:
                 async with asyncio.timeout(CHECK_TIMEOUT):
+                    await self._wait_reply_subscription(pending)
                     await mqtt.async_publish(self.hass, f"{self.base_topic}/{self.address}/set", json.dumps({
                         "check_connection": {"request_id": self._check_request_id},
                     }), qos=0, retain=False)
