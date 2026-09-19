@@ -147,6 +147,7 @@ GPIO, наличие делителя и пороги батареи. Пакет
 Содержимое экрана настраивается в HA. Добавьте репозиторий
 `https://github.com/lukdut/gtag-nrf-display` в HACS с типом **Integration**.
 [Инструкция для HA OS и HA Container](docs/installation.md).
+[Сборка и прошивка через ESPHome со скриншотами](docs/esphome-flashing.md).
 [Проверки HA Container и сборки на amd64 / arm64](docs/container-verification.md).
 
 Для разработки с локальными исходниками используйте конфигурацию ниже.
