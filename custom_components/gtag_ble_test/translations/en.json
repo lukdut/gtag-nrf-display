@@ -157,7 +157,7 @@
     "step": {
       "values": {
         "title": "Display values",
-        "description": "Choose the information to display. Empty labels and units use the entity's own name and unit.",
+        "description": "Choose the information to display. Empty labels and units use the entity's own name and unit. Weather needs a weather entity with hourly forecasts. The graph needs a numeric entity recorded by Recorder; select 1–168 hours. Missing history or forecasts are shown as a dash.",
         "data": {
           "entity_1": "First entity",
           "label_1": "First label",
@@ -166,7 +166,8 @@
           "label_2": "Second label",
           "unit_2": "Second unit",
           "decimals_1": "Decimal places — first value",
-          "decimals_2": "Decimal places — second value"
+          "decimals_2": "Decimal places — second value",
+          "history_hours": "History period, hours"
         },
         "data_description": {
           "label_1": "Optional. Up to 80 characters; text fits the available space.",
@@ -240,7 +241,7 @@
       },
       "diagnostics": {
         "title": "Device diagnostics",
-        "description": "**Connection:** {transport}\n\n**Firmware:** {firmware}\n\n**Features:** {features}\n\n**Codecs:** {codecs}\n\n**Battery:** {battery}\n\n**Last successful display update:** {last_update}\n\n**Last data confirmation:** {last_confirmation}\n\n**Transfer:** {display_status}\n\n**Freshness:** {stale}\n\n**Update error:** {display_error}\n\n---\n\n**Last connection check:** {check_status}\n\n**Checked at:** {checked_at} · {duration} s\n\n**Reason / next step:** {check_error}\n\n**Technical details:** {check_detail}\n\nThe check waits up to 60 seconds for a fresh device reply. It does not change the image or renew its freshness. The result describes the moment of the check. Refresh information reads HA data without contacting the device.",
+        "description": "**Connection:** {transport}\n\n**Firmware:** {firmware, select, legacy {Legacy firmware (version not reported)} unknown {No data yet} other {{firmware}}}\n\n**Features:** {features, select, none {None} unknown {No data yet} freshness {Stale-data icon} battery_voltage {Battery measurement} battery_bar {Battery bar} battery_protection {Low-battery protection} freshness_battery_voltage {Stale-data icon, Battery measurement} freshness_battery_bar {Stale-data icon, Battery bar} freshness_battery_protection {Stale-data icon, Low-battery protection} battery_voltage_battery_bar {Battery measurement, Battery bar} battery_voltage_battery_protection {Battery measurement, Low-battery protection} battery_bar_battery_protection {Battery bar, Low-battery protection} freshness_battery_voltage_battery_bar {Stale-data icon, Battery measurement, Battery bar} freshness_battery_voltage_battery_protection {Stale-data icon, Battery measurement, Low-battery protection} freshness_battery_bar_battery_protection {Stale-data icon, Battery bar, Low-battery protection} battery_voltage_battery_bar_battery_protection {Battery measurement, Battery bar, Low-battery protection} freshness_battery_voltage_battery_bar_battery_protection {Stale-data icon, Battery measurement, Battery bar, Low-battery protection} other {{features}}}\n\n**Codecs:** {codecs, select, none {None} unknown {No data yet} raw {Uncompressed (RAW)} white_rle_v1 {White-pixel compression (WHITE_RLE_V1)} raw_white_rle_v1 {Uncompressed (RAW), White-pixel compression (WHITE_RLE_V1)} other {{codecs}}}\n\n**Battery:** {battery, select, disabled {Disabled} unknown {No data yet} other {{battery}}}\n\n**Last successful display update:** {last_update, select, unknown {No data yet} other {{last_update}}}\n\n**Last data confirmation:** {last_confirmation, select, unknown {No data yet} other {{last_confirmation}}}\n\n**Transfer:** {display_status, select, idle {No transfers yet} queued {Update queued} sending {Sending image} sent {Image delivered} unchanged {Image unchanged} transfer_error {Image transfer failed} other {{display_status}}}\n\n**Freshness:** {stale, select, unknown {No data yet} stale {Data is stale} fresh {Data confirmed} other {{stale}}}\n\n**Update error:** {display_error, select, none {None} other {{display_error}}}\n\n---\n\n**Last connection check:** {check_status, select, not_checked {Not checked yet} checking {Waiting for a device reply} ok {Device replied} error {Check failed} other {{check_status}}}\n\n**Checked at:** {checked_at, select, unknown {No data yet} other {{checked_at}}} · {duration} s\n\n**Reason / next step:** {check_error, select, none {None} unloaded {The integration is unloaded. Enable or reload the device in HA.} device_busy {The device is busy sending an image or reading the battery. Try again shortly.} mqtt_offline {HA is disconnected from MQTT. Check the MQTT integration and broker.} bridge_offline {Zigbee2MQTT is offline. Start it and retry.} device_missing {The device is absent from Zigbee2MQTT. Check pairing and the selected MQTT base topic.} converter_update_required {Update gtag-display.mjs in Zigbee2MQTT from the same package as the HA integration.} timeout {No fresh reply arrived. Check power and radio coverage; for Zigbee also check the converter. Low-battery protection switches the radio off.} incompatible_firmware {The device replied, but its frame format is unsupported. Check firmware and integration versions.} invalid_response {The device returned an invalid response. Check firmware and converter versions.} bluetooth_unavailable {No connectable Bluetooth advertisement found. Check power, range and the HA Bluetooth adapter/proxy.} communication_error {Communication failed. Check the details below, power and the selected transport.} other {{check_error}}}\n\n**Technical details:** {check_detail, select, none {None} other {{check_detail}}}\n\nThe check waits up to 60 seconds for a fresh device reply. It does not change the image or renew its freshness. The result describes the moment of the check. Refresh information reads HA data without contacting the device.",
         "data": {
           "action": "Action"
         }
@@ -257,7 +258,9 @@
       "layout_file_too_large": "The layout file must be at most 256 KiB.",
       "invalid_entity_mapping": "Select a matching HA entity for every source entity.",
       "no_layout_to_export": "No saved layout. Configure the display or send a layout with Draw first. Raw test images have no exportable layout.",
-      "layout_download_unavailable": "Unable to create a download link. Copy the JSON below or try again."
+      "layout_download_unavailable": "Unable to create a download link. Copy the JSON below or try again.",
+      "hourly_forecast_required": "Choose a weather entity supporting hourly forecasts.",
+      "numeric_entity_required": "Choose an entity with a numeric value."
     },
     "abort": {
       "layout_exported": "{download_link_start}Download {filename}{download_link_end}\n\nThe link is valid for 20 minutes, until HA restarts. Display settings have not changed.",
@@ -274,7 +277,9 @@
         "clock": "Clock and date",
         "single_value": "One large value",
         "clock_two_values": "Clock and two values",
-        "custom": "Custom layout"
+        "custom": "Custom layout",
+        "weather": "Weather and hourly forecast",
+        "value_graph": "Value and history graph"
       }
     },
     "preview_action": {

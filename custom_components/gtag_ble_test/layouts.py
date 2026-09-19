@@ -11,9 +11,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.template import Template
 
-from .render import LAYOUT_SCHEMA, RenderedFrame, render_layout
+from .render import DYNAMIC_TYPES, LAYOUT_SCHEMA, RenderedFrame, render_layout
 
-PRESETS = ("clock", "single_value", "clock_two_values")
+PRESETS = ("clock", "single_value", "clock_two_values", "weather", "value_graph")
 DEFAULT_PRESET = "clock_two_values"
 DEFAULT_INTERVAL = 5
 DECIMAL_PLACES = ("original", "0", "1", "2", "3", "4", "5", "6")
@@ -24,6 +24,7 @@ SETTINGS_SCHEMA = vol.Schema({
     vol.Optional("auto_update"): bool,
     vol.Optional("update_interval", default=DEFAULT_INTERVAL): vol.All(vol.Coerce(int), vol.Range(min=5, max=3600)),
     vol.Optional("stale_after", default=15): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
+    vol.Optional("history_hours", default=24): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
     **{vol.Optional(f"entity_{index}"): cv.entity_id for index in (1, 2)},
     **{vol.Optional(f"label_{index}", default=""): vol.All(str, vol.Length(max=80)) for index in (1, 2)},
     **{vol.Optional(f"unit_{index}", default=""): vol.All(str, vol.Length(max=16)) for index in (1, 2)},
@@ -70,11 +71,14 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     for index in range(1, value_count(settings["preset"]) + 1):
         if not settings.get(f"entity_{index}"):
             raise vol.Invalid(f"entity_{index} is required for this preset", [f"entity_{index}"])
+    domains = ["weather"] if settings["preset"] == "weather" else ["sensor", "input_number", "number"] if settings["preset"] == "value_graph" else None
+    if domains and settings["entity_1"].split(".")[0] not in domains:
+        raise vol.Invalid("Invalid entity domain for this preset", ["entity_1"])
     return settings
 
 
 def value_count(preset: str) -> int:
-    return 2 if preset == "clock_two_values" else 1 if preset == "single_value" else 0
+    return 2 if preset == "clock_two_values" else 1 if preset in ("single_value", "weather", "value_graph") else 0
 
 
 def _quoted(value: str) -> str:
@@ -119,6 +123,12 @@ def preset_layout(settings: dict[str, Any]) -> dict[str, Any]:
     settings = validate_settings(settings)
     if settings["preset"] == "custom":
         return deepcopy(settings["layout"])
+    if settings["preset"] == "weather":
+        return {"elements": [{"type": "weather", "entity_id": settings["entity_1"], "label": settings["label_1"]}]}
+    if settings["preset"] == "value_graph":
+        return {"elements": [{"type": "history_graph", "entity_id": settings["entity_1"],
+                              "label": settings["label_1"], "unit": settings["unit_1"],
+                              "decimals": settings["decimals_1"], "hours": settings["history_hours"]}]}
     text = lambda x, y, value, size, width, align="left": {
         "type": "text", "x": x, "y": y, "text": value, "size": size,
         "max_width": width, "align": align,
@@ -161,8 +171,14 @@ def upgrade_saved_preset(layout: dict[str, Any], settings: dict[str, Any]) -> di
 
 async def async_render_layout(hass: HomeAssistant, layout: dict[str, Any]) -> RenderedFrame:
     """Resolve templates on HA's loop and draw in the executor."""
-    layout = deepcopy(layout)
-    for element in layout["elements"]:
+    layout = LAYOUT_SCHEMA(deepcopy(layout))
+    dynamic_data = {}
+    for index, element in enumerate(layout["elements"]):
         if element["type"] == "text":
             element["text"] = Template(element["text"], hass).async_render(parse_result=False)
+        elif element["type"] in DYNAMIC_TYPES:
+            from .widget_data import resolve_widget
+            dynamic_data[index] = await resolve_widget(hass, element)
+    if dynamic_data:
+        return await hass.async_add_executor_job(render_layout, layout, dynamic_data)
     return await hass.async_add_executor_job(render_layout, layout)

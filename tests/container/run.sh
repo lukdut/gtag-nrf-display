@@ -47,6 +47,20 @@ api:
 http:
 history:
 recorder:
+weather:
+  - platform: template
+    name: GTag Container Weather
+    condition_template: partlycloudy
+    temperature_template: "{{ states('input_number.gtag_temperature') }}"
+    temperature_unit: "°C"
+    humidity_template: "{{ states('input_number.gtag_humidity') }}"
+    forecast_hourly_template: >-
+      {% set result = namespace(items=[]) %}
+      {% for hour in range(1, 7) %}
+        {% set result.items = result.items + [{'datetime': (now() + timedelta(hours=hour)).isoformat(),
+          'condition': 'rainy', 'temperature': 22 - hour}] %}
+      {% endfor %}
+      {{ result.items }}
 logger:
   default: warning
 input_number:

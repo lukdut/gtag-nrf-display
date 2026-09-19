@@ -7,10 +7,8 @@ import re
 
 import voluptuous as vol
 from homeassistant.helpers import selector
-from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
 from .display import Display
 
 
@@ -31,11 +29,10 @@ class DiagnosticFlowMixin:
                 return await self.async_step_init()
             if user_input["action"] == "check":
                 return await self.async_step_check_connection()
-        translations = await async_get_translations(
-            self.hass, self.context.get("language", self.hass.config.language), "selector", {DOMAIN})
-
         def label(key):
-            return translations.get(f"component.{DOMAIN}.selector.diagnostic_value.options.{key}", key)
+            # HA options HTTP flows carry no profile language. Return enum keys;
+            # the frontend's ICU message translates them in the user's language.
+            return key
 
         def timestamp(value):
             return dt_util.as_local(value).strftime("%Y-%m-%d %H:%M:%S %Z") if value else label("unknown")
@@ -48,8 +45,8 @@ class DiagnosticFlowMixin:
             "transport": "Zigbee2MQTT" if display.zigbee else "Bluetooth",
             "firmware": safe_text(label("legacy") if legacy else info.get("firmware_version") or label("unknown")),
             "features": (label("unknown") if features is None or legacy else
-                         ", ".join(label(name) for name in features) or label("none")),
-            "codecs": ", ".join(label(name) for name in info.get("firmware_codecs", [])) or label("unknown"),
+                         "_".join(features) or label("none")),
+            "codecs": "_".join(info.get("firmware_codecs", [])) or label("unknown"),
             "last_update": timestamp(display.last_success),
             "last_confirmation": timestamp(display.last_confirmation),
             "display_status": label("transfer_error" if display.status == "error" else display.status),

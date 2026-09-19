@@ -35,15 +35,16 @@ for (const file of ['strings.json', 'translations/en.json', 'translations/ru.jso
   test(`${file}: diagnostics renders every value through ICU and Markdown`, () => {
     const labels = data.selector.diagnostic_value.options;
     const message = new IntlMessageFormat(data.options.step.diagnostics.description, language).format({
-      transport: 'Zigbee2MQTT', firmware: '0.9.0', features: labels.battery_protection,
-      codecs: labels.white_rle_v1, last_update: '2026-09-19 12:00:00 MSK',
-      last_confirmation: labels.unknown, display_status: labels.sent,
-      display_error: labels.none, stale: labels.stale, check_status: labels.error,
+      transport: 'Zigbee2MQTT', firmware: '0.9.0', features: 'battery_protection',
+      codecs: 'white_rle_v1', last_update: '2026-09-19 12:00:00 MSK',
+      last_confirmation: 'unknown', display_status: 'sent',
+      display_error: 'none', stale: 'stale', check_status: 'error',
       checked_at: '2026-09-19 12:01:00 MSK', duration: '32.45',
-      check_error: labels.timeout, check_detail: 'No reply {request_id}: &lt;packet&gt;', battery: '4.190 V',
+      check_error: 'timeout', check_detail: 'No reply {request_id}: &lt;packet&gt;', battery: '4.190 V',
     });
     const html = filterXSS(marked.parse(message, {gfm: true, breaks: true}));
     assert.ok(html.includes('0.9.0') && html.includes(labels.timeout));
+    assert.ok(html.includes(labels.sent) && html.includes(labels.battery_protection));
     assert.ok(html.includes('No reply {request_id}: &lt;packet&gt;'));
     assert.ok(!html.includes('INVALID_TAG'));
   });

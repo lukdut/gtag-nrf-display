@@ -11,7 +11,7 @@ from .const import DOMAIN
 from .layout_download import async_export_download
 from .layout_transfer import (
     MAX_FILE_BYTES, LayoutFileError, current_screen, decode_document, encode_document,
-    entity_references, export_document, remap_settings,
+    entity_domains, entity_references, export_document, remap_settings,
 )
 
 
@@ -94,7 +94,10 @@ class LayoutTransferMixin:
         errors = {}
         if user_input is not None and self._import_index < len(sources):
             target = user_input["entity_id"]
-            if target in excluded:
+            domains = entity_domains(self._import_document["screen"], sources[self._import_index])
+            if domains and target.split(".")[0] not in domains:
+                errors["entity_id"] = "invalid_entity_mapping"
+            elif target in excluded:
                 errors["entity_id"] = "invalid_entity"
             elif not self.hass.states.get(target) and not registry.async_get(target):
                 errors["entity_id"] = "entity_not_found"
@@ -111,11 +114,12 @@ class LayoutTransferMixin:
             else:
                 return await self.async_step_preview()
         source = sources[self._import_index]
+        domains = entity_domains(self._import_document["screen"], source)
         suggested = self._import_mapping.get(source)
         if not suggested and source not in excluded and (self.hass.states.get(source) or registry.async_get(source)):
             suggested = source
         schema = vol.Schema({vol.Required("entity_id"): selector.EntitySelector(
-            selector.EntitySelectorConfig(exclude_entities=excluded),
+            selector.EntitySelectorConfig(exclude_entities=excluded, **({"filter": {"domain": domains}} if domains else {})),
         )})
         if suggested:
             schema = self.add_suggested_values_to_schema(schema, {"entity_id": suggested})

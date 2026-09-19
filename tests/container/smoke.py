@@ -362,6 +362,29 @@ class Check:
         assert response["service_response"]["status"] == "ok"
         self.passed_step("Diagnostic page and Check action; fresh MQTT response, clear timeout, recovery")
 
+    async def dynamic_previews(self):
+        # Exercise HA's real template-weather service and Recorder on each host
+        # architecture, without changing the layout used by the restart check.
+        forecasts = await self.request("POST", "/api/services/weather/get_forecasts?return_response",
+            json={"entity_id": "weather.gtag_container_weather", "type": "hourly"})
+        assert len(forecasts["service_response"]["weather.gtag_container_weather"]["forecast"]) == 6
+        images = []
+        for preset, entity_id in (("weather", "weather.gtag_container_weather"),
+                                  ("value_graph", "input_number.gtag_temperature")):
+            flow = await self.options("configure")
+            flow = await self.step(flow, {"preset": preset, "update_interval": 30,
+                                         "stale_after": 5}, "values", options=True)
+            values = {"entity_1": entity_id, "label_1": "Проверка"}
+            if preset == "value_graph":
+                values.update(history_hours=24, decimals_1="1")
+            flow = await self.step(flow, values, "preview", options=True)
+            svg = flow["description_placeholders"]["preview"]
+            assert '<svg xmlns=' in svg and not flow.get("errors")
+            images.append(svg)
+            await self.request("DELETE", f"{OPTIONS}/{flow['flow_id']}")
+        assert images[0] != images[1]
+        self.passed_step("Weather hourly service and history-graph previews through real HA options flows")
+
     async def restart(self):
         count = len(self.device.frames)
         await asyncio.to_thread(subprocess.run, ["docker", "compose", "-p", os.environ["GTAG_COMPOSE_PROJECT"],
@@ -385,7 +408,7 @@ async def main():
         check = Check(session, device, output)
         try:
             for task in (check.onboard, check.wizard, check.setup_device, check.layout,
-                         check.layout_transfer, check.diagnostics, check.restart):
+                         check.layout_transfer, check.dynamic_previews, check.diagnostics, check.restart):
                 print(f"RUN: {task.__name__}", flush=True)
                 await task()
         finally:

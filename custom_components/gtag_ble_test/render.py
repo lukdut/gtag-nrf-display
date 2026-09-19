@@ -12,11 +12,14 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 import voluptuous as vol
+from homeassistant.helpers import config_validation as cv
 
 WIDTH, HEIGHT = 256, 128
 FONT_PATH = Path(__file__).with_name("fonts") / "DejaVuSans.ttf"
 BIT_REVERSE = bytes(int(f"{value:08b}"[::-1], 2) for value in range(256))
-ICONS = ("clock", "calendar", "thermometer", "humidity", "home")
+ICONS = ("clock", "calendar", "thermometer", "humidity", "home", "sunny", "clear-night",
+         "cloudy", "partlycloudy", "rainy", "pouring", "snowy", "snowy-rainy", "hail",
+         "lightning", "lightning-rainy", "fog", "windy", "windy-variant", "exceptional", "unknown")
 COLOR = vol.In(("black", "white"))
 X = vol.All(int, vol.Range(min=0, max=WIDTH - 1))
 Y = vol.All(int, vol.Range(min=0, max=HEIGHT - 1))
@@ -64,11 +67,34 @@ ICON_SCHEMA = vol.Schema({
     vol.Required("name"): vol.In(ICONS),
     vol.Optional("size", default=24): vol.All(int, vol.Range(min=8, max=64)),
 })
+WEATHER_SCHEMA = vol.Schema({
+    vol.Required("type"): "weather",
+    vol.Required("entity_id"): cv.entity_domain("weather"),
+    vol.Optional("label", default=""): vol.All(str, vol.Length(max=80)),
+})
+HISTORY_SCHEMA = vol.Schema({
+    vol.Required("type"): "history_graph",
+    vol.Required("entity_id"): cv.entity_domain(["sensor", "input_number", "number"]),
+    vol.Optional("hours", default=24): vol.All(int, vol.Range(min=1, max=168)),
+    vol.Optional("label", default=""): vol.All(str, vol.Length(max=80)),
+    vol.Optional("unit", default=""): vol.All(str, vol.Length(max=16)),
+    vol.Optional("decimals", default="original"): vol.In(("original", "0", "1", "2", "3", "4", "5", "6")),
+})
+DYNAMIC_TYPES = ("weather", "history_graph")
+
+
+def _full_screen_widgets(elements):
+    if len(elements) > 1 and any(item["type"] in DYNAMIC_TYPES for item in elements):
+        raise vol.Invalid("Weather and history widgets occupy the entire screen")
+    return elements
+
+
 LAYOUT_SCHEMA = vol.Schema({
     vol.Optional("background", default="white"): COLOR,
     vol.Required("elements"): vol.All(
-        [vol.Any(TEXT_SCHEMA, LINE_SCHEMA, RECTANGLE_SCHEMA, ICON_SCHEMA)],
+        [vol.Any(TEXT_SCHEMA, LINE_SCHEMA, RECTANGLE_SCHEMA, ICON_SCHEMA, WEATHER_SCHEMA, HISTORY_SCHEMA)],
         vol.Length(max=64),
+        _full_screen_widgets,
     ),
 })
 
@@ -152,14 +178,23 @@ def _icon(draw: ImageDraw.ImageDraw, item: dict[str, Any], color: int) -> None:
         draw.line(points(1, 11, 12, 1, 23, 11), fill=color, width=width)
         draw.line(points(4, 9, 4, 23, 20, 23, 20, 9), fill=color, width=width)
         draw.rectangle(points(9, 15, 15, 23), outline=color, width=width)
+    else:
+        from .widget_render import weather_icon
+        weather_icon(draw, name, points, color, width)
 
 
-def render_layout(layout: dict[str, Any]) -> RenderedFrame:
+def render_layout(layout: dict[str, Any], dynamic_data: dict | None = None) -> RenderedFrame:
     layout = LAYOUT_SCHEMA(layout)
     image = Image.new("1", (WIDTH, HEIGHT), int(layout["background"] == "white"))
     draw = ImageDraw.Draw(image)
     fonts = {}
-    for item in layout["elements"]:
+    for index, item in enumerate(layout["elements"]):
+        if item["type"] in DYNAMIC_TYPES:
+            from .widget_render import draw_widget
+            if dynamic_data is None or index not in dynamic_data:
+                raise ValueError("Dynamic layouts must be resolved through Home Assistant")
+            draw_widget(image, item, dynamic_data[index])
+            continue
         color = int(item["color"] == "white")
         kind = item["type"]
         if kind == "text":

@@ -145,10 +145,13 @@ def test_diagnostic_errors_are_plain_text():
 async def test_options_diagnostics_progress_translations_and_button_service(hass, loaded, radio, delayed):
     entry = loaded
     options_before = dict(entry.options)
-    result = await hass.config_entries.options.async_init(entry.entry_id, context={'language':'ru'})
+    # Real HA options HTTP flows do not provide the profile language. The same
+    # enum payload is localized by either Russian or English frontend messages.
+    hass.config.language = 'en'
+    result = await hass.config_entries.options.async_init(entry.entry_id)
     assert 'diagnostics' in result['menu_options']
     result = await hass.config_entries.options.async_configure(result['flow_id'], {'next_step_id':'diagnostics'})
-    assert result['description_placeholders']['check_status'] == 'Ещё не проверяли'
+    assert result['description_placeholders']['check_status'] == 'not_checked'
     if delayed:
         async def read(_uuid):
             await asyncio.sleep(0)
@@ -161,14 +164,14 @@ async def test_options_diagnostics_progress_translations_and_button_service(hass
         result = await hass.config_entries.options.async_configure(result['flow_id'])
     assert result['step_id'] == 'diagnostics'
     assert result['description_placeholders']['firmware'] == '0.9.0'
-    assert result['description_placeholders']['check_status'] == 'Плата ответила'
-    assert 'Защита от разряда' in result['description_placeholders']['features']
+    assert result['description_placeholders']['check_status'] == 'ok'
+    assert 'battery_protection' in result['description_placeholders']['features']
     assert entry.options == options_before
     entry.runtime_data.status = 'error'
     entry.runtime_data.last_error = 'Image CRC mismatch'
     result = await hass.config_entries.options.async_configure(result['flow_id'], {'action':'refresh'})
-    assert result['description_placeholders']['display_status'] == 'Ошибка передачи изображения'
-    assert result['description_placeholders']['check_status'] == 'Плата ответила'
+    assert result['description_placeholders']['display_status'] == 'transfer_error'
+    assert result['description_placeholders']['check_status'] == 'ok'
     assert result['description_placeholders']['display_error'] == 'Image CRC mismatch'
     result = await hass.config_entries.options.async_configure(result['flow_id'], {'action':'back'})
     assert result['type'] == 'menu'

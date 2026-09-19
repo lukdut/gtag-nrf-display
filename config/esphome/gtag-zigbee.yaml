@@ -5,7 +5,7 @@ substitutions:
   gtag_friendly_name: GTag Zigbee Display
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v0.9.0
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v1.0.0
 
 # Explicit hardware settings: physical nRF52840 GPIO names.
 gtag_display:
@@ -24,5 +24,5 @@ gtag_display:
 
 # Without the external battery divider, replace the entire battery_voltage block
 # with: {enabled: false}, and add this package AFTER gtag above:
-#   no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v0.9.0
+#   no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v1.0.0
 # Install zigbee2mqtt/gtag-display.mjs from this release in Zigbee2MQTT.

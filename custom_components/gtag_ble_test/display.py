@@ -25,7 +25,7 @@ from .battery import BatteryMonitor
 from .connection import ConnectionCheck
 from .frame_protocol import PreparedFrame
 from .layouts import async_render_layout, normalize_saved_timing, preset_layout, upgrade_saved_preset, validate_settings
-from .render import LAYOUT_SCHEMA, RenderedFrame, clock_layout, from_raw
+from .render import DYNAMIC_TYPES, LAYOUT_SCHEMA, RenderedFrame, clock_layout, from_raw
 from .transport import FrameSender, connect, get_operation_lock, renew_freshness
 
 _LOGGER = logging.getLogger(__name__)
@@ -262,11 +262,18 @@ class Display:
         if not self.auto_update or self.last_layout is None:
             return
         templates = []
+        dynamic = False
         for element in self.last_layout["elements"]:
             if element["type"] == "text":
                 template = Template(element["text"], self.hass)
                 if not template.is_static:
                     templates.append(TrackTemplate(template, None))
+            elif element["type"] in DYNAMIC_TYPES:
+                templates.append(TrackTemplate(Template("{{ states[" + repr(element["entity_id"]) + "] }}", self.hass), None))
+                dynamic = True
+        if dynamic:
+            # Forecast and history windows move even if the current state does not.
+            templates.append(TrackTemplate(Template("{{ now().minute }}", self.hass), None))
         if templates:
             self._template_tracker = async_track_template_result(
                 self.hass, templates, self._on_template_change,

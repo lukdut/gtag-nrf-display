@@ -232,16 +232,25 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
         excluded = excluded_entities(self.hass)
         fields = {}
         count = value_count(self._settings["preset"])
+        weather = self._settings["preset"] == "weather"
+        graph = self._settings["preset"] == "value_graph"
+        domains = ["weather"] if weather else ["sensor", "input_number", "number"] if graph else None
         for index in range(1, count + 1):
             fields[vol.Required(f"entity_{index}")] = selector.EntitySelector(
-                selector.EntitySelectorConfig(exclude_entities=excluded),
+                selector.EntitySelectorConfig(exclude_entities=excluded, **({"filter": {"domain": domains}} if domains else {})),
             )
             fields[vol.Optional(f"label_{index}")] = selector.TextSelector()
+            if weather:
+                continue
             fields[vol.Optional(f"unit_{index}")] = selector.TextSelector()
             fields[vol.Optional(f"decimals_{index}", default="original")] = selector.SelectSelector(
                 selector.SelectSelectorConfig(options=list(DECIMAL_PLACES), translation_key="decimal_places",
                                               mode=selector.SelectSelectorMode.DROPDOWN),
             )
+        if graph:
+            fields[vol.Required("history_hours", default=self._settings.get("history_hours", 24))] = selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1, max=168, step=1, mode=selector.NumberSelectorMode.BOX,
+                                              unit_of_measurement="h"))
         schema = vol.Schema(fields)
         errors = {}
         if user_input is not None:
@@ -255,6 +264,18 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
                     errors[f"entity_{index}"] = "invalid_entity"
                 elif not self.hass.states.get(entity_id) and not registry.async_get(entity_id):
                     errors[f"entity_{index}"] = "entity_not_found"
+                else:
+                    state = self.hass.states.get(entity_id)
+                    if weather:
+                        from homeassistant.components.weather import WeatherEntityFeature
+                        if state and state.state not in ("unknown", "unavailable") and not int(state.attributes.get("supported_features", 0)) & WeatherEntityFeature.FORECAST_HOURLY:
+                            errors[f"entity_{index}"] = "hourly_forecast_required"
+                    elif graph and state and state.state not in ("unknown", "unavailable"):
+                        from .widget_data import number
+                        if number(state.state) is None:
+                            errors[f"entity_{index}"] = "numeric_entity_required"
+            if graph:
+                candidate["history_hours"] = user_input.get("history_hours", 24)
             try:
                 candidate = validate_settings(candidate)
             except vol.Invalid as err:

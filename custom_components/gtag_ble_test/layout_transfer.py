@@ -13,7 +13,7 @@ from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
 from .layouts import DEFAULT_INTERVAL, normalize_saved_timing, preset_layout, validate_settings, value_count
-from .render import LAYOUT_SCHEMA
+from .render import DYNAMIC_TYPES, LAYOUT_SCHEMA
 
 FORMAT = "gtag-display-layout"
 VERSION = 1
@@ -66,7 +66,22 @@ def entity_references(settings: dict) -> list[str]:
     for element in settings["layout"]["elements"]:
         if element["type"] == "text":
             entities.extend(item[2] for item in _references(element["text"])[1])
+        elif element["type"] in DYNAMIC_TYPES:
+            entities.append(element["entity_id"])
     return list(dict.fromkeys(entities))
+
+
+def entity_domains(settings: dict, source: str) -> list[str] | None:
+    """Preserve the source kind when importing a weather or numeric widget."""
+    if settings["preset"] == "weather":
+        return ["weather"]
+    if settings["preset"] == "value_graph":
+        return ["sensor", "input_number", "number"]
+    if settings["preset"] == "custom":
+        for item in settings["layout"]["elements"]:
+            if item["type"] in DYNAMIC_TYPES and item["entity_id"] == source:
+                return ["weather"] if item["type"] == "weather" else ["sensor", "input_number", "number"]
+    return None
 
 
 def remap_settings(settings: dict, mapping: dict[str, str]) -> dict:
@@ -79,6 +94,9 @@ def remap_settings(settings: dict, mapping: dict[str, str]) -> dict:
             result[f"entity_{index}"] = mapping[result[f"entity_{index}"]]
     else:
         for element in result["layout"]["elements"]:
+            if element["type"] in DYNAMIC_TYPES:
+                element["entity_id"] = mapping[element["entity_id"]]
+                continue
             if element["type"] != "text":
                 continue
             text, references = _references(element["text"])
@@ -100,6 +118,8 @@ def _canonical_settings(settings: dict) -> dict:
         for index in range(1, value_count(settings["preset"]) + 1):
             for field in ("entity", "label", "unit", "decimals"):
                 result[f"{field}_{index}"] = settings[f"{field}_{index}"]
+        if settings["preset"] == "value_graph":
+            result["history_hours"] = settings["history_hours"]
     return result
 
 

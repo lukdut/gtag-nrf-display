@@ -1,10 +1,10 @@
 # Zigbee-экран в Home Assistant
 
-Стабильная **0.9.0** поддерживает Zigbee2MQTT и Bluetooth в одной интеграции
+Версия **1.0.0** поддерживает Zigbee2MQTT и Bluetooth в одной интеграции
 **GTag Display**. Макеты, предпросмотр, кнопка обновления, часы, шаблоны
 и действие `gtag_ble_test.draw` работают с обоими вариантами связи.
 
-В локальной версии после 0.9.0 добавлена [диагностика с проверкой связи](device-diagnostics.md).
+В 1.0.0 добавлена [диагностика с проверкой связи](device-diagnostics.md).
 Для неё обновляются интеграция и конвертер; прошивка остаётся прежней.
 В новом конвертере Exposes сокращены: вместо служебных полей есть `check_connection`.
 `firmware_capabilities` по-прежнему передаётся через MQTT, но отдельного поля в Exposes больше нет.
@@ -12,14 +12,14 @@
 ## Установка
 
 1. Прошейте `gtag-zigbee.uf2` для Pro Micro / nice!nano или
-   `gtag-super52840-zigbee.uf2` для Super52840 из релиза 0.9.0 и добавьте плату
+   `gtag-super52840-zigbee.uf2` для Super52840 из релиза 1.0.0 и добавьте плату
    в Zigbee2MQTT. Модель — `GTag_Display_Frame_V1`, без АЦП — `GTag_Display_Frame_NoBat`.
    [Сборка и аппаратные настройки](device-configuration.md),
    [Super52840 и отключение датчика](pin-remapping.md).
    Уже работающие устройства на прежнем протоколе кадров 1 можно оставить
    без перепрошивки: для них будет выбран режим [legacy](firmware-compatibility.md).
 2. Установите в Zigbee2MQTT внешний конвертер
-   [`gtag-display.mjs`](../zigbee2mqtt/gtag-display.mjs) из релиза 0.9.0
+   [`gtag-display.mjs`](../zigbee2mqtt/gtag-display.mjs) из релиза 1.0.0
    по [инструкции установки конвертера](zigbee-prototype.md#установка-конвертера).
    При обновлении замените файл и перезапустите Zigbee2MQTT. В Exposes должны
    появиться `firmware_version` и `firmware_capabilities`; если описание не обновилось,

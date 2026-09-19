@@ -29,7 +29,7 @@ def test_pixel_packing_matches_lcd_and_preview():
 def test_cyrillic_and_all_icons():
     cyrillic = render_layout({"elements": [
         {"type": "text", "x": 8, "y": 8, "text": "Привет, мир! Ёжик", "size": 20},
-        *[{"type": "icon", "name": name, "x": 8 + i * 45, "y": 64, "size": 32}
+        *[{"type": "icon", "name": name, "x": 8 + (i % 8) * 31, "y": 38 + (i // 8) * 30, "size": 24}
           for i, name in enumerate(ICONS)],
     ]})
     assert len(cyrillic.raw) == 4096
@@ -84,7 +84,7 @@ def test_long_text_fits_its_column():
 @pytest.mark.parametrize("layout", [
     {"elements": [{"type": "text", "x": 256, "y": 0, "text": "bad"}]},
     {"elements": [{"type": "text", "x": 0, "y": 0, "text": "bad", "size": 500}]},
-    {"elements": [{"type": "icon", "x": 0, "y": 0, "name": "unknown"}]},
+    {"elements": [{"type": "icon", "x": 0, "y": 0, "name": "not_an_icon"}]},
     {"elements": [{"type": "text", "x": 0, "y": 0, "text": "X" * 1025}]},
     {"elements": [{"type": "rectangle", "x": 20, "y": 20, "x2": 10, "y2": 10}]},
 ])
