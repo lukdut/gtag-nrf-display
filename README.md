@@ -1,30 +1,59 @@
 # GTag Display — nRF52840 + Home Assistant
 
-Экран LCD 256×128 от электронного ценника G-Tag подключён к плате
-nRF52840 Pro Micro / nice!nano. Home Assistant передаёт кадр через Bluetooth
-или Zigbee2MQTT; прошивка проверяет CRC32 и выводит изображение.
+**GTag Display превращает электронный ценник G-Tag в беспроводной экран
+для Home Assistant.** На нём можно показывать время, погоду, температуру,
+состояние устройств и другие данные из HA. Вы выбираете макет и источники
+данных в интерфейсе Home Assistant, а экран обновляется автоматически.
 
-В проекте два профиля с общим драйвером [gtag_display](config/esphome/components/gtag_display):
+Для переделки используются штатный LCD 256×128 и добавленная плата
+**nRF52840 Pro Micro / Super Mini / nice!nano**. Связь с HA — через
+**Zigbee2MQTT или Bluetooth**. Проект включает прошивку для платы,
+кастомную интеграцию HA и инструкции по подготовке ценника.
 
-| Связь | ESPHome Device Builder | Локальная разработка |
-|---|---|---|
-| Bluetooth | [gtag-ble.yaml](config/esphome/gtag-ble.yaml) | [nrf-gtag-display.yaml](config/esphome/nrf-gtag-display.yaml) |
-| Zigbee2MQTT | [gtag-zigbee.yaml](config/esphome/gtag-zigbee.yaml) | [nrf-gtag-zigbee.yaml](config/esphome/nrf-gtag-zigbee.yaml) |
-| Zigbee2MQTT, Super52840 без измерения напряжения | [gtag-super52840-zigbee.yaml](config/esphome/gtag-super52840-zigbee.yaml) | [nrf-gtag-super52840-zigbee.yaml](config/esphome/nrf-gtag-super52840-zigbee.yaml) |
+| До: ценник в исходном виде | После: данные Home Assistant на экране |
+|:---:|:---:|
+| ![Электронный ценник G-Tag до переделки](docs/images/project/original-tag.webp) | ![Готовый GTag Display: время, дата, температура и влажность из HA](docs/images/project/ha-display.webp) |
 
-Стабильный релиз **0.9.0** поддерживает оба транспорта. Основная целевая плата —
-**Pro Micro / nice!nano с Zigbee2MQTT**. Для Super52840 есть отдельная сборка;
-Bluetooth сохраняется как дополнительный профиль.
+На фото справа установлена простая задняя крышка:
+[модель для 3D-печати на Thingiverse](https://www.thingiverse.com/thing:7411674).
 
-Интеграция устанавливается через пользовательский репозиторий **HACS**, прошивка
-собирается в **ESPHome Device Builder**. Готовые UF2 также доступны в
-[релизе v0.9.0](https://github.com/lukdut/gtag-nrf-display/releases/tag/v0.9.0).
-[Пошаговая установка](docs/installation.md) ·
-[Подготовка экрана с фотографиями](docs/display-preparation.md) ·
-[Полный YAML устройства](docs/device-configuration.md) ·
-[Настройка макетов](docs/screens.md).
+## С чего начать
 
-![Пример макета «Время и два показателя»](docs/screen-clock-two.png)
+1. **Подготовьте экран.** Разберите ценник, отделите линии управления
+   от штатного контроллера и подключите nRF52840.
+   [Инструкция с фотографиями](docs/display-preparation.md) ·
+   [Подключение платы и выбор GPIO](docs/pin-remapping.md).
+2. **Установите интеграцию в HA.** Добавьте репозиторий
+   `https://github.com/lukdut/gtag-nrf-display` в HACS, скачайте **GTag Display**
+   и перезапустите HA.
+   [Установка через HACS](docs/installation.md#интеграция-через-hacs).
+3. **Подготовьте конфигурацию платы.** Выберите Bluetooth или Zigbee,
+   укажите GPIO и параметры батареи. Скачайте YAML из
+   [мастера GTag в HA](docs/firmware-wizard.md) или возьмите
+   [полный пример конфигурации](docs/device-configuration.md).
+4. **Добавьте YAML в ESPHome.** Установите Device Builder и импортируйте
+   файл своей платы.
+   [Установка ESPHome и импорт YAML со скриншотами](docs/esphome-flashing.md).
+5. **Соберите и прошейте.** Скачайте UF2, переведите плату двойным Reset
+   в загрузчик и скопируйте файл на его USB-диск.
+   [Сборка и запись прошивки](docs/esphome-flashing.md#4-проверьте-настройки-и-запустите-сборку).
+6. **Подключите экран к HA.** Для Zigbee установите конвертер, добавьте плату
+   в Zigbee2MQTT и выберите её в GTag Display; для Bluetooth добавьте
+   обнаруженный GTag.
+   [Подключение через Zigbee2MQTT](docs/zigbee-home-assistant.md) ·
+   [Добавление устройства в HA](docs/installation.md#интеграция-через-hacs).
+7. **Настройте содержимое.** Выберите макет и сущности HA, проверьте
+   предпросмотр и нажмите «Применить».
+   [Макеты, округление и произвольные экраны](docs/screens.md) ·
+   [Диагностика и проверка связи](docs/device-diagnostics.md).
+
+**Для стабильного релиза 0.9.0 используйте полный пример YAML:** мастер
+конфигурации подготовлен для следующего выпуска. Если распиновка и батарея
+совпадают с готовым профилем, UF2 можно взять из
+[релиза v0.9.0](https://github.com/lukdut/gtag-nrf-display/releases/tag/v0.9.0).
+[Полная инструкция установки](docs/installation.md).
+
+## Возможности
 
 - Готовые макеты, выбор сущностей, округление, предпросмотр и произвольный `draw`.
 - Независимая работа нескольких экранов и восстановление после потери связи.
@@ -35,13 +64,30 @@ Bluetooth сохраняется как дополнительный профи�
   при разряде с автоматическим восстановлением после зарядки.
 - Явная настройка GPIO, наличия измерения, калибровки и порогов батареи в YAML.
 
+![Пример макета «Время и два показателя»](docs/screen-clock-two.png)
+
+## Версии и варианты прошивки
+
+Стабильный релиз **0.9.0** поддерживает оба транспорта. Основная целевая плата —
+**Pro Micro / nice!nano с Zigbee2MQTT**. Для Super52840 есть отдельная сборка;
+Bluetooth сохраняется как дополнительный профиль.
+
+Все варианты используют общий драйвер
+[gtag_display](config/esphome/components/gtag_display).
+
+| Связь | ESPHome Device Builder | Локальная разработка |
+|---|---|---|
+| Bluetooth | [gtag-ble.yaml](config/esphome/gtag-ble.yaml) | [nrf-gtag-display.yaml](config/esphome/nrf-gtag-display.yaml) |
+| Zigbee2MQTT | [gtag-zigbee.yaml](config/esphome/gtag-zigbee.yaml) | [nrf-gtag-zigbee.yaml](config/esphome/nrf-gtag-zigbee.yaml) |
+| Zigbee2MQTT, Super52840 без измерения напряжения | [gtag-super52840-zigbee.yaml](config/esphome/gtag-super52840-zigbee.yaml) | [nrf-gtag-super52840-zigbee.yaml](config/esphome/nrf-gtag-super52840-zigbee.yaml) |
+
 Проверенные версии: HA **2026.9.2**, ESPHome **2026.9.0**, Zigbee2MQTT **2.12.0**,
 NCS **2.9.2**. В простое пользователь измерил около **50 мкА** на основной плате;
 это измерение конкретной сборки, а не гарантия для любой платы и конфигурации.
 [Возможности выпуска](docs/releases/0.9.0.md) · [Проверки и план развития](docs/roadmap.md).
 Технический домен интеграции `gtag_ble_test` сохранён для совместимости.
 
-В локальной версии после 0.9.0 добавлен [мастер подготовки YAML в HA](docs/firmware-wizard.md):
+В ветке `main` для следующего выпуска добавлен [мастер подготовки YAML в HA](docs/firmware-wizard.md):
 выбор платы и связи, GPIO, параметров батареи и скачивание конфигурации для ESPHome.
 Также доступен [экспорт и импорт макетов](docs/layout-transfer.md) с выбором
 соответствующих сущностей и предпросмотром перед применением.
