@@ -94,6 +94,7 @@ async def resolve_widget(hass, item):
                                 "temperature": number(entry.get("temperature"))}
         return {**common, "condition": state.state if available else "unknown",
                 "temperature": number(attrs.get("temperature")) if available else None,
+                "apparent_temperature": number(attrs.get("apparent_temperature")) if available else None,
                 "humidity": number(attrs.get("humidity")) if available else None,
                 "unit": str(attrs.get("temperature_unit") or "")[:16],
                 "forecast": [forecasts[key] for key in sorted(forecasts)[:6]]}

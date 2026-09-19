@@ -101,10 +101,16 @@ def draw_widget(image, item, data):
     if item["type"] == "weather":
         unit = data["unit"]
         value = format_number(data["temperature"], "0")
+        apparent = data.get("apparent_temperature")
         elements += [icon(8, 27, data["condition"], 36),
-                     text(57, 29, value + (f" {unit}" if data["temperature"] is not None else ""), 32, 147),
+                     text(57, 26 if apparent is not None else 29,
+                          value + (f" {unit}" if data["temperature"] is not None else ""),
+                          28 if apparent is not None else 32, 147),
                      text(248, 44, format_number(data["humidity"], "0") + ("%" if data["humidity"] is not None else ""), 14, 44, "right"),
                      {"type": "line", "x": 8, "y": 66, "x2": 247, "y2": 66}]
+        if apparent is not None:
+            elements.append(text(57, 53, "Ощущается: " + format_number(apparent, "0")
+                                 + (f" {unit}" if unit else ""), 12, 147))
         for i in range(6):
             entry = data["forecast"][i] if i < len(data["forecast"]) else {}
             center = 24 + 42 * i

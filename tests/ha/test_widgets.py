@@ -11,6 +11,7 @@ import yaml
 from homeassistant.components.weather import WeatherEntity, WeatherEntityFeature
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_system import METRIC_SYSTEM, US_CUSTOMARY_SYSTEM
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.gtag_ble_test.layouts import async_render_layout, preset_layout, validate_settings
@@ -113,6 +114,81 @@ async def test_weather_without_hourly_service_or_unavailable_keeps_current_infor
     data = await resolve_widget(hass, layout["elements"][0])
     assert data["temperature"] is None and not data["forecast"]
     assert (await async_render_layout(hass, layout)).raw != first.raw
+
+
+@pytest.mark.parametrize("units,expected,unit", [(METRIC_SYSTEM, 10, "°C"), (US_CUSTOMARY_SYSTEM, 50, "°F")])
+async def test_apparent_temperature_uses_ha_units_and_updates_without_forecast_refresh(hass, weather, units, expected, unit):
+    hass.config.units = units
+    weather._attr_native_apparent_temperature = 10
+    weather.async_write_ha_state()
+    item = preset_layout({"preset": "weather", "entity_1": weather.entity_id})["elements"][0]
+    first = await resolve_widget(hass, item)
+    assert first["apparent_temperature"] == expected and first["unit"] == unit
+    weather._attr_native_apparent_temperature = 0
+    weather.async_write_ha_state()
+    second = await resolve_widget(hass, item)
+    assert second["apparent_temperature"] == (0 if unit == "°C" else 32)
+    assert weather.calls == 1
+
+
+async def test_apparent_temperature_attribute_change_updates_active_display(hass, weather, display, sent, monkeypatch):
+    monkeypatch.setattr(type(display), "update_interval", property(lambda self: 0))
+    await display.async_apply_settings({"preset": "weather", "entity_1": weather.entity_id}, "weather")
+    before = sent[-1]
+    weather._attr_native_apparent_temperature = 19
+    weather.async_write_ha_state()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(sent) == 2 and sent[-1] != before
+    assert weather.calls == 1
+
+
+@pytest.mark.parametrize("preset,entity", [("weather", "weather.test"), ("value_graph", "sensor.test")])
+async def test_dynamic_widget_tracks_source_creation_changes_and_removal(hass, display, sent, monkeypatch, freezer, preset, entity):
+    monkeypatch.setattr(type(display), "update_interval", property(lambda self: 0))
+    await display.async_apply_settings({"preset": preset, "entity_1": entity}, "dynamic")
+    assert len(sent) == 1
+    state = "sunny" if preset == "weather" else "21"
+    attrs = {"temperature": 21, "temperature_unit": "°C", "apparent_temperature": 19}
+    hass.states.async_set(entity, state, attrs)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(sent) == 2
+    hass.states.async_set(entity, state if preset == "weather" else "22", {**attrs, "apparent_temperature": 0})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(sent) == 3
+    hass.states.async_remove(entity)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(sent) == 4
+    hass.states.async_set(entity, state, attrs)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(sent) == 5
+
+
+@pytest.mark.parametrize("value", [None, "unknown", "unavailable", "nan", "inf", "bad"])
+async def test_apparent_temperature_hides_missing_or_invalid_data(hass, value):
+    attrs = {"temperature": 21, "temperature_unit": "°C", "apparent_temperature": value}
+    hass.states.async_set("weather.test", "sunny", attrs)
+    item = preset_layout({"preset": "weather", "entity_1": "weather.test"})["elements"][0]
+    assert (await resolve_widget(hass, item))["apparent_temperature"] is None
+    hass.states.async_set("weather.test", "unavailable", {**attrs, "apparent_temperature": 19})
+    assert (await resolve_widget(hass, item))["apparent_temperature"] is None
+
+
+@pytest.mark.parametrize("apparent", [0, -12, 19, 104])
+async def test_apparent_temperature_only_changes_current_temperature_area(hass, apparent):
+    attrs = {"temperature": 21, "temperature_unit": "°C", "humidity": 48}
+    hass.states.async_set("weather.test", "sunny", attrs)
+    layout = preset_layout({"preset": "weather", "entity_1": "weather.test"})
+    before = Image.open(BytesIO((await async_render_layout(hass, layout)).png))
+    hass.states.async_set("weather.test", "sunny", {**attrs, "apparent_temperature": apparent})
+    after = Image.open(BytesIO((await async_render_layout(hass, layout)).png))
+    assert before.crop((57, 26, 204, 66)).tobytes() != after.crop((57, 26, 204, 66)).tobytes()
+    # The icon, humidity, hourly forecast and battery overlay area keep their space.
+    for box in [(0, 0, 256, 26), (0, 26, 57, 66), (204, 26, 256, 66), (0, 66, 256, 128)]:
+        assert before.crop(box).tobytes() == after.crop(box).tobytes()
+    assert after.crop((0, 125, 256, 128)).getextrema() == (255, 255)
+    hass.states.async_set("weather.test", "sunny", attrs)
+    restored = Image.open(BytesIO((await async_render_layout(hass, layout)).png))
+    assert restored.tobytes() == before.tobytes()
 
 
 async def test_history_uses_real_recorder_with_unavailability_gap(recorder_mock, hass, freezer):

@@ -269,7 +269,15 @@ class Display:
                 if not template.is_static:
                     templates.append(TrackTemplate(template, None))
             elif element["type"] in DYNAMIC_TYPES:
-                templates.append(TrackTemplate(Template("{{ states[" + repr(element["entity_id"]) + "] }}", self.hass), None))
+                entity_id = repr(element["entity_id"])
+                # Read state/attributes explicitly: printing TemplateState alone
+                # does not register its dependencies with HA's template tracker.
+                template = Template(
+                    "{% set source = states[" + entity_id + "] %}"
+                    "{{ (source.state, source.attributes) if source is not none else states(" + entity_id + ") }}",
+                    self.hass,
+                )
+                templates.append(TrackTemplate(template, None))
                 dynamic = True
         if dynamic:
             # Forecast and history windows move even if the current state does not.

@@ -10,7 +10,7 @@ import math
 import re
 from typing import Any
 
-# Firmware is unchanged in HA 1.0.0. Keep the wizard on the tested, published
+# Firmware is unchanged in HA 1.0.x. Keep the wizard on the tested, published
 # firmware tag so YAML also builds before the next HA release is published.
 FIRMWARE_TAG = "v0.9.0"
 PACKAGE_ROOT = "github://lukdut/gtag-nrf-display/config/esphome/packages"
