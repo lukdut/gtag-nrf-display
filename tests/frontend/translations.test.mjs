@@ -43,9 +43,14 @@ for (const file of ['strings.json', 'translations/en.json', 'translations/ru.jso
       check_error: 'timeout', check_detail: 'No reply {request_id}: &lt;packet&gt;', battery: '4.190 V',
     });
     const html = filterXSS(marked.parse(message, {gfm: true, breaks: true}));
-    assert.ok(html.includes('0.9.0') && html.includes(labels.timeout));
-    assert.ok(html.includes(labels.sent) && html.includes(labels.battery_protection));
-    assert.ok(html.includes('No reply {request_id}: &lt;packet&gt;'));
+    // Values are rendered by HA's read-only selectors using diagnostic_value;
+    // the prose must remain compatible with HA's Python placeholder validator.
+    for (const key of ['timeout', 'sent', 'battery_protection', 'unknown', 'none']) {
+      assert.ok(labels[key] && labels[key] !== key);
+    }
+    for (const key of ['features', 'codecs', 'display_status', 'check_error', 'duration']) {
+      assert.ok(data.options.step.diagnostics.data[key]);
+    }
     assert.ok(!html.includes('INVALID_TAG'));
   });
   const descriptions = {

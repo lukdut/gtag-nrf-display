@@ -2,10 +2,12 @@
 import asyncio
 from datetime import timedelta
 from io import BytesIO
+from pathlib import Path
 
 from PIL import Image
 import pytest
 import voluptuous as vol
+import yaml
 from homeassistant.components.weather import WeatherEntity, WeatherEntityFeature
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
@@ -48,6 +50,22 @@ async def weather(hass):
     entity = ForecastWeather()
     await hass.data["weather"].async_add_entities([entity])
     return entity
+
+
+async def test_container_demo_uses_supported_template_weather_yaml(hass):
+    script = (Path(__file__).resolve().parents[2] / 'tests/container/run.sh').read_text()
+    raw = script.split(".write_text('''", 1)[1].split("''', encoding=", 1)[0]
+    config = yaml.safe_load(raw)
+    hass.states.async_set('input_number.gtag_temperature', '21.5')
+    hass.states.async_set('input_number.gtag_humidity', '45')
+    assert await async_setup_component(hass, 'template', config)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    state = hass.states.get('weather.gtag_container_weather')
+    assert state is not None and state.state == 'partlycloudy'
+    response = await hass.services.async_call('weather', 'get_forecasts',
+        {'entity_id': state.entity_id, 'type': 'hourly'}, blocking=True, return_response=True)
+    assert len(response[state.entity_id]['forecast']) == 6
+    await hass.data['weather'].async_remove_entity(state.entity_id)
 
 
 async def test_real_forecast_service_conversion_cache_and_future_times(hass, weather, freezer):

@@ -31,7 +31,7 @@ class DiagnosticFlowMixin:
                 return await self.async_step_check_connection()
         def label(key):
             # HA options HTTP flows carry no profile language. Return enum keys;
-            # the frontend's ICU message translates them in the user's language.
+            # read-only selectors translate them in the user's language.
             return key
 
         def timestamp(value):
@@ -60,11 +60,28 @@ class DiagnosticFlowMixin:
             "battery": (label("disabled") if display.battery.supported is False else
                         f"{display.battery.voltage:.3f} V" if display.battery.voltage is not None else label("unknown")),
         }
-        return self.async_show_form(step_id="diagnostics", data_schema=vol.Schema({
+        fields = {
             vol.Required("action", default="check"): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=["check", "refresh", "back"],
                     translation_key="diagnostic_action", mode=selector.SelectSelectorMode.DROPDOWN)),
-        }), description_placeholders=placeholders)
+        }
+        values = {**placeholders,
+                  "features": (["unknown"] if features is None or legacy else features or ["none"]),
+                  "codecs": info.get("firmware_codecs") or ["unknown"],
+                  "display_error": str(display.last_error)[:1500] if display.last_error else "none",
+                  "check_detail": str(check.detail)[:1500] if check.detail else "none"}
+        enums = {"display_status", "stale", "check_status", "check_error"}
+        for key, value in values.items():
+            multiple = isinstance(value, list)
+            if multiple or key in enums or value in ("unknown", "none", "disabled", "legacy"):
+                field = selector.SelectSelector(selector.SelectSelectorConfig(
+                    options=value if multiple else [value], multiple=multiple,
+                    translation_key="diagnostic_value", read_only=True))
+            else:
+                field = selector.TextSelector(selector.TextSelectorConfig(read_only=True, multiline=key in ("display_error", "check_detail")))
+            fields[vol.Optional(key, default=value)] = field
+        return self.async_show_form(step_id="diagnostics", data_schema=vol.Schema(fields),
+                                    description_placeholders=placeholders)
 
     async def async_step_check_connection(self, user_input=None):
         display = getattr(self.config_entry, "runtime_data", None)

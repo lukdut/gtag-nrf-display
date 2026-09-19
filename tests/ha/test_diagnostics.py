@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 from bleak.exc import BleakCharacteristicNotFoundError
 import pytest
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
 from custom_components.gtag_ble_test import transport as ble, zigbee
@@ -146,7 +147,7 @@ async def test_options_diagnostics_progress_translations_and_button_service(hass
     entry = loaded
     options_before = dict(entry.options)
     # Real HA options HTTP flows do not provide the profile language. The same
-    # enum payload is localized by either Russian or English frontend messages.
+    # enum payload is localized by Russian or English read-only selectors.
     hass.config.language = 'en'
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert 'diagnostics' in result['menu_options']
@@ -186,6 +187,23 @@ async def test_options_diagnostics_progress_translations_and_button_service(hass
     assert response['status'] == 'ok'
     assert response['firmware_features'] == ['freshness','battery_voltage','battery_bar','battery_protection']
     assert radio.read_gatt_char.await_count == 3
+
+
+async def test_diagnostics_use_read_only_translated_selectors_and_valid_ha_messages(hass, loaded, caplog):
+    result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(result['flow_id'], {'next_step_id': 'diagnostics'})
+    fields = {key.schema: (key.default(), value) for key, value in result['data_schema'].schema.items()}
+    assert fields['features'][0] == ['unknown']
+    for name, (_default, field) in fields.items():
+        if name != 'action':
+            assert field.config['read_only']
+    assert fields['check_status'][1].config['translation_key'] == 'diagnostic_value'
+    assert fields['features'][1].config['multiple']
+    for language in ('en', 'ru'):
+        await async_get_translations(hass, language, 'options', {DOMAIN})
+    assert 'Error while parsing localized' not in caplog.text
+    assert 'Validation of translation placeholders' not in caplog.text
+    hass.config_entries.options.async_abort(result['flow_id'])
 
 
 async def test_unloading_during_progress_returns_explanation(hass, loaded, radio):
