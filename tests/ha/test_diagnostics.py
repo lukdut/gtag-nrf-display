@@ -190,6 +190,7 @@ async def test_options_diagnostics_progress_translations_and_button_service(hass
 
 
 async def test_diagnostics_use_read_only_translated_selectors_and_valid_ha_messages(hass, loaded, caplog):
+    loaded.runtime_data.connection_check.error_code = 'device_busy'
     result = await hass.config_entries.options.async_init(loaded.entry_id)
     result = await hass.config_entries.options.async_configure(result['flow_id'], {'next_step_id': 'diagnostics'})
     fields = {key.schema: (key.default(), value) for key, value in result['data_schema'].schema.items()}
@@ -198,6 +199,7 @@ async def test_diagnostics_use_read_only_translated_selectors_and_valid_ha_messa
         if name != 'action':
             assert field.config['read_only']
     assert fields['check_status'][1].config['translation_key'] == 'diagnostic_value'
+    assert fields['check_error'][0] == 'device_busy'  # Enum keys must not be Markdown-escaped.
     assert fields['features'][1].config['multiple']
     for language in ('en', 'ru'):
         await async_get_translations(hass, language, 'options', {DOMAIN})

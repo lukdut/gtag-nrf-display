@@ -55,7 +55,7 @@ class DiagnosticFlowMixin:
             "check_status": label(check.status),
             "checked_at": timestamp(check.checked_at),
             "duration": str(check.seconds) if check.seconds is not None else "—",
-            "check_error": safe_text(label(check.error_code)) if check.error_code else label("none"),
+            "check_error": label(check.error_code) if check.error_code else label("none"),
             "check_detail": safe_text(check.detail) if check.detail else label("none"),
             "battery": (label("disabled") if display.battery.supported is False else
                         f"{display.battery.voltage:.3f} V" if display.battery.voltage is not None else label("unknown")),
@@ -76,7 +76,7 @@ class DiagnosticFlowMixin:
             if multiple or key in enums or value in ("unknown", "none", "disabled", "legacy"):
                 field = selector.SelectSelector(selector.SelectSelectorConfig(
                     options=value if multiple else [value], multiple=multiple,
-                    translation_key="diagnostic_value", read_only=True))
+                    translation_key="diagnostic_value", mode=selector.SelectSelectorMode.DROPDOWN, read_only=True))
             else:
                 field = selector.TextSelector(selector.TextSelectorConfig(read_only=True, multiline=key in ("display_error", "check_detail")))
             fields[vol.Optional(key, default=value)] = field
