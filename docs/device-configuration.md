@@ -1,13 +1,13 @@
 # Полная конфигурация устройства в ESPHome Device Builder
 
-Пример для версии **1.0.1**, ESPHome Device Builder **2026.9.0**.
+Пример для версии **1.1.0**, ESPHome Device Builder **2026.9.0**.
 Параметры аппаратуры применяются после сборки и прошивки; содержимое экрана
 настраивается в интеграции GTag Display в HA.
 
 1. Создайте в Device Builder файл `gtag-kitchen.yaml`.
 2. Вставьте YAML ниже. Это **Pro Micro / Super Mini с загрузчиком nice!nano
    S140 6.x**, внешним делителем 1 МОм / 1 МОм и конденсатором 100 нФ.
-   Пакет и компонент автоматически загрузятся с тега `v1.0.1`.
+   Пакет и компонент автоматически загрузятся с тега `v1.1.0`.
 
 ```yaml
 substitutions:
@@ -15,7 +15,7 @@ substitutions:
   gtag_friendly_name: "Экран кухни"
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v1.0.1
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v1.1.0
 
 nrf52:
   board: adafruit_itsybitsy_nrf52840
@@ -46,7 +46,7 @@ gtag_display:
    Уже сопряжённое устройство после обычного обновления сохраняет сеть.
 
 Для Bluetooth замените единственную строку пакета на
-`gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v1.0.1`. Аппаратные параметры остаются
+`gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v1.1.0`. Аппаратные параметры остаются
 такими же; конвертер Zigbee2MQTT в этом варианте не используется.
 Для второго устройства задайте другое `gtag_name`.
 
@@ -90,8 +90,8 @@ gtag_display:
 
 ```yaml
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v1.0.1
-  no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v1.0.1
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v1.1.0
+  no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v1.1.0
 ```
 
 Этот пакет также убирает Zigbee-датчик и выбирает модель без батареи.

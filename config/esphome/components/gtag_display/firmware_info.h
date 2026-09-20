@@ -9,7 +9,7 @@ namespace esphome::gtag_display::firmware_info {
 // Bump for every published firmware; capabilities, not version comparisons,
 // decide which packets a host may send.
 #ifdef USE_GTAG_WIFI
-inline constexpr char VERSION[] = "1.1.0-beta.2";
+inline constexpr char VERSION[] = "1.1.0";
 #else
 inline constexpr char VERSION[] = "0.9.0";
 #endif

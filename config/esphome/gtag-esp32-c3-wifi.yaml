@@ -4,11 +4,15 @@ substitutions:
   gtag_friendly_name: GTag Display Wi-Fi
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/wifi.yaml@v1.1.0-beta.2
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/wifi.yaml@v1.1.0
 
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  # If Wi-Fi fails with "Auth Expired", uncomment both options below,
+  # rebuild and flash via USB. Lower TX power may reduce range.
+  # power_save_mode: none
+  # output_power: 8.5dB
 
 api:
   encryption:

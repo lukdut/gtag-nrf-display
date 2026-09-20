@@ -10,10 +10,10 @@
 **Zigbee2MQTT или Bluetooth**. Проект включает прошивку для платы,
 кастомную интеграцию HA и инструкции по подготовке ценника.
 
-В **1.1.0-beta.2** добавлен вариант **ESP32-C3 Super Mini + Wi-Fi**
+В **1.1.0** добавлен вариант **ESP32-C3 Super Mini + Wi-Fi**
 с питанием от USB, штатным OTA ESPHome и возможностью добавлять адресную
-ленту, кнопки и датчики через YAML. Этот вариант ожидает
-проверки на физической плате: [подключение и установка ESP32](docs/esp32-wifi.md).
+ленту, кнопки и датчики через YAML. На физической плате проверены вывод погоды,
+OTA и восстановление связи: [подключение и установка ESP32](docs/esp32-wifi.md).
 
 | До: ценник в исходном виде | После: данные Home Assistant на экране |
 |:---:|:---:|
@@ -69,7 +69,7 @@
 - Согласование версии протокола, кодеков и функций отдельно с каждой платой;
   поддержка прежних прошивок через режим legacy.
 - Автономный значок устаревших данных, стартовый логотип и QR-код репозитория.
-- Измерение LiPo, нелинейная шкала заряда внизу экрана и отключение радио
+- Для nRF52840: измерение LiPo, нелинейная шкала заряда внизу экрана и отключение радио
   при разряде с автоматическим восстановлением после зарядки.
 - Явная настройка GPIO, наличия измерения, калибровки и порогов батареи в YAML.
 
@@ -81,14 +81,14 @@
 
 ## Версии и варианты прошивки
 
-Стабильная версия **1.0.1** поддерживает Bluetooth и Zigbee. Основная целевая плата —
+Версия **1.1.0** поддерживает Bluetooth, Zigbee и Wi-Fi. Основная батарейная плата —
 **Pro Micro / nice!nano с Zigbee2MQTT**. Для Super52840 есть отдельная сборка;
 Bluetooth сохраняется как дополнительный профиль.
 
-Предварительный выпуск **[1.1.0-beta.2](https://github.com/lukdut/gtag-nrf-display/releases/tag/v1.1.0-beta.2)**
-добавляет Wi-Fi на ESP32-C3. В HACS выберите эту версию среди предварительных
-выпусков; стабильная ветка остаётся на 1.0.1. Для существующих nRF52840 достаточно
-обновить интеграцию и перезапустить HA, перепрошивка не нужна.
+Стабильный выпуск **[1.1.0](https://github.com/lukdut/gtag-nrf-display/releases/tag/v1.1.0)**
+добавляет Wi-Fi на ESP32-C3 с питанием от USB. Для существующих nRF52840 достаточно
+обновить интеграцию и перезапустить HA, перепрошивка не нужна. При `Auth Expired`
+в YAML есть закомментированные параметры для проверки на проблемных платах.
 
 Все варианты используют общий драйвер
 [gtag_display](config/esphome/components/gtag_display).
@@ -98,12 +98,12 @@ Bluetooth сохраняется как дополнительный профи�
 | Bluetooth | [gtag-ble.yaml](config/esphome/gtag-ble.yaml) | [nrf-gtag-display.yaml](config/esphome/nrf-gtag-display.yaml) |
 | Zigbee2MQTT | [gtag-zigbee.yaml](config/esphome/gtag-zigbee.yaml) | [nrf-gtag-zigbee.yaml](config/esphome/nrf-gtag-zigbee.yaml) |
 | Zigbee2MQTT, Super52840 без измерения напряжения | [gtag-super52840-zigbee.yaml](config/esphome/gtag-super52840-zigbee.yaml) | [nrf-gtag-super52840-zigbee.yaml](config/esphome/nrf-gtag-super52840-zigbee.yaml) |
-| Wi-Fi, ESP32-C3 Super Mini, USB (beta) | [gtag-esp32-c3-wifi.yaml](config/esphome/gtag-esp32-c3-wifi.yaml) | [esp32-gtag-display.yaml](config/esphome/esp32-gtag-display.yaml) |
+| Wi-Fi, ESP32-C3 Super Mini, USB | [gtag-esp32-c3-wifi.yaml](config/esphome/gtag-esp32-c3-wifi.yaml) | [esp32-gtag-display.yaml](config/esphome/esp32-gtag-display.yaml) |
 
 Проверенные версии: HA **2026.9.2**, ESPHome **2026.9.0**, Zigbee2MQTT **2.12.0**,
 NCS **2.9.2**. В простое пользователь измерил около **50 мкА** на основной плате;
 это измерение конкретной сборки, а не гарантия для любой платы и конфигурации.
-[Стабильный выпуск](docs/releases/1.0.1.md) · [Wi-Fi beta](docs/releases/1.1.0-beta.2.md) · [Проверки и план развития](docs/roadmap.md).
+[Стабильный выпуск](docs/releases/1.1.0.md) · [Проверки и план развития](docs/roadmap.md).
 Технический домен интеграции `gtag_ble_test` сохранён для совместимости.
 
 В **1.0.1** погодный макет показывает «Ощущается», если источник передаёт это
@@ -208,7 +208,7 @@ gtag_display:
 Создайте устройство в ESPHome Device Builder и скопируйте **полный**
 [gtag-zigbee.yaml](config/esphome/gtag-zigbee.yaml) или
 [gtag-ble.yaml](config/esphome/gtag-ble.yaml). Задайте уникальное имя и проверьте
-GPIO, наличие делителя и пороги батареи. Пакет закреплён на теге `v1.1.0-beta.2`;
+GPIO, наличие делителя и пороги батареи. Пакет закреплён на теге `v1.1.0`;
 прошивка nRF52840 сохраняет версию 0.9.0.
 [Полный пример с объяснениями](docs/device-configuration.md) также показывает,
 как отключить измерение, если делителя нет. Для Zigbee установите

@@ -34,8 +34,11 @@ or deep sleep. See examples/wifi-led-strip.yaml for an optional WS2812 strip.
 The public gtag-esp32-c3-wifi.yaml asset instead fetches a pinned GitHub package.
 Do not share filled-in secrets.yaml or a wizard YAML containing credentials.
 
-Hardware test on a physical ESP32-C3 is still pending for 1.1.0-beta.2.
-Full instructions: https://github.com/lukdut/gtag-nrf-display/blob/v1.1.0-beta.2/docs/esp32-wifi.md
+Wi-Fi, the HA weather layout, OTA and reconnection were verified on a physical
+ESP32-C3 Super Mini. The WS2812 example was compile-tested only.
+For Auth Expired, try uncommenting power_save_mode and output_power in the YAML,
+then rebuild and flash over USB. Reduced TX power may reduce range.
+Full instructions: https://github.com/lukdut/gtag-nrf-display/blob/v1.1.0/docs/esp32-wifi.md
 """
 
 

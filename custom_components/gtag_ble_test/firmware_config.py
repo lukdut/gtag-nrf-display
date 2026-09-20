@@ -13,7 +13,7 @@ from typing import Any
 # nRF52840 firmware is unchanged. Keep its wizard on the tested firmware tag;
 # the ESP32 profile has a separate release pin.
 FIRMWARE_TAG = "v0.9.0"
-WIFI_FIRMWARE_TAG = "v1.1.0-beta.2"
+WIFI_FIRMWARE_TAG = "v1.1.0"
 PACKAGE_ROOT = "github://lukdut/gtag-nrf-display/config/esphome/packages"
 LCD_PINS = ("dio_pin", "clk_pin", "cs_pin", "reset_pin")
 RESERVED_GPIO = {0, 1, 9, 10, 18}
@@ -163,6 +163,10 @@ def render_firmware_yaml(settings: dict) -> str:
             f"  gtag_friendly_name: {quote(settings['friendly_name'])}", "", "packages:",
             f"  gtag: {PACKAGE_ROOT}/wifi.yaml@{WIFI_FIRMWARE_TAG}", "", "wifi:",
             f"  ssid: {quote(settings['wifi_ssid'])}", f"  password: {quote(settings['wifi_password'])}",
+            '  # If Wi-Fi fails with "Auth Expired", uncomment both options below,',
+            "  # rebuild and flash via USB. Lower TX power may reduce range.",
+            "  # power_save_mode: none",
+            "  # output_power: 8.5dB",
             "", "api:", "  encryption:", f"    key: {quote(settings['api_key'])}", "", "ota:",
             "  - platform: esphome", f"    password: {quote(settings['ota_password'])}", "", "gtag_display:",
             *[f"  {field}: {settings[field]}" for field in LCD_PINS],

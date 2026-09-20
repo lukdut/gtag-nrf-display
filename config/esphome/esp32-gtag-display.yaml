@@ -11,6 +11,10 @@ external_components:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  # If Wi-Fi fails with "Auth Expired", uncomment both options below,
+  # rebuild and flash via USB. Lower TX power may reduce range.
+  # power_save_mode: none
+  # output_power: 8.5dB
 
 api:
   encryption:
