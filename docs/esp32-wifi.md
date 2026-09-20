@@ -5,7 +5,7 @@
 интеграции GTag Display. Связь использует штатный API ESPHome; MQTT и
 Bluetooth не требуются. Первая установка — через USB, следующие — через OTA.
 
-**Статус:** предварительный выпуск **1.1.0-beta.1**. Установите эту версию
+**Статус:** предварительный выпуск **1.1.0-beta.2**. Установите эту версию
 интеграции через HACS, включив показ предварительных выпусков, и перезапустите HA.
 Проверка на физическом ESP32-C3 с экраном и лентой пока не выполнена.
 Стабильная версия 1.0.1 поддерживает nRF52840 и не содержит профиля Wi-Fi.
@@ -50,7 +50,7 @@ substitutions:
   gtag_friendly_name: Экран кухни
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/wifi.yaml@v1.1.0-beta.1
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/wifi.yaml@v1.1.0-beta.2
 
 wifi:
   ssid: !secret wifi_ssid
@@ -86,7 +86,7 @@ gtag_display:
 esphome compile config/esphome/esp32-gtag-display.yaml
 ```
 
-Также в [релизе](https://github.com/lukdut/gtag-nrf-display/releases/tag/v1.1.0-beta.1)
+Также в [релизе](https://github.com/lukdut/gtag-nrf-display/releases/tag/v1.1.0-beta.2)
 есть автономный архив `gtag-esp32-c3-wifi-esphome.zip` с исходниками и пустым
 `secrets.example.yaml`. Готового BIN для ESP32 нет: сборка содержит ваши
 данные Wi-Fi, ключ API, пароль OTA, GPIO и дополнительные компоненты.

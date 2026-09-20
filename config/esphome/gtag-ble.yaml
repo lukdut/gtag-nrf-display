@@ -5,7 +5,7 @@ substitutions:
   gtag_friendly_name: NRF GTag Display
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v1.1.0-beta.1
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/ble.yaml@v1.1.0-beta.2
 
 # Explicit hardware settings: physical nRF52840 GPIO names.
 gtag_display:

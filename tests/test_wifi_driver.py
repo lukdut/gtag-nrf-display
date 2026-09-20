@@ -12,6 +12,25 @@ from saleae_reference import reference_words
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class HeaderIsolationTests(unittest.TestCase):
+    def test_esphome_can_include_the_wifi_header_on_nrf52840(self):
+        # ESPHome adds every component header to esphome.h, including headers
+        # for inactive platforms. The Wi-Fi one must expose no symbols/deps.
+        with tempfile.TemporaryDirectory(prefix="gtag-header-platform-") as temporary:
+            build = Path(temporary)
+            defines = build / "esphome/core/defines.h"
+            defines.parent.mkdir(parents=True)
+            defines.write_text("#define USE_NRF52\n#define USE_ZEPHYR\n")
+            source = build / "headers.cpp"
+            source.write_text('#include "gtag_display_esp32.h"\n'
+                              'namespace esphome::gtag_display {\n'
+                              'enum class BootPattern { LOGO };\n'
+                              'class GTagDisplay {};\n}\n')
+            subprocess.run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
+                            "-I", str(build), "-I", str(ROOT / "config/esphome/components/gtag_display"),
+                            str(source)], check=True)
+
+
 class WifiDriverTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

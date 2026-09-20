@@ -1,5 +1,8 @@
 #pragma once
 
+#include "esphome/core/defines.h"
+#ifdef USE_ESP32
+
 #include <array>
 #include <string>
 #include "esphome/core/component.h"
@@ -56,3 +59,4 @@ class GTagDisplay : public Component {
 };
 
 }  // namespace esphome::gtag_display
+#endif  // USE_ESP32

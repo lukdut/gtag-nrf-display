@@ -28,7 +28,7 @@ def device(hass):
         async def info(call):
             calls.append(call)
             packet = struct.pack('<BBBBIIHHHH', 1, 1, 1, 1, state["codecs"], 1, 256, 128, 4096, 4096)
-            return {"wifi_protocol": 1, "info": (packet + b"1.1.0-beta.1".ljust(20, b'\0')).hex()}
+            return {"wifi_protocol": 1, "info": (packet + b"1.1.0-beta.2".ljust(20, b'\0')).hex()}
 
         async def frame(call):
             calls.append(call)
@@ -58,7 +58,7 @@ async def test_send_negotiates_codec_and_confirms_render(hass, device):
     report = await dev.transport.async_send(raw, 300)
     assert dev.state["raw"] == raw
     assert report["transport"] == "wifi" and report["encoded_size"] < 4096
-    assert report["firmware_version"] == "1.1.0-beta.1"
+    assert report["firmware_version"] == "1.1.0-beta.2"
     assert report["freshness_timeout"] == 300
     await dev.transport.async_confirm(report["frame_id"], int(report["raw_crc32"], 16), 1)
     dev.state["frame"] = None  # Device restarted and lost its framebuffer.
@@ -92,7 +92,7 @@ async def test_two_devices_are_independent(hass, device):
     hass.services.async_remove("esphome", "gtag_kitchen_gtag_info")
     with pytest.raises(HomeAssistantError):
         await first.transport.async_check_connection()
-    assert (await second.transport.async_check_connection()).firmware_version == "1.1.0-beta.1"
+    assert (await second.transport.async_check_connection()).firmware_version == "1.1.0-beta.2"
 
 
 async def test_config_flow_and_duplicate(hass, device, monkeypatch):

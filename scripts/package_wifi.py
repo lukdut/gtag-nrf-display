@@ -34,8 +34,8 @@ or deep sleep. See examples/wifi-led-strip.yaml for an optional WS2812 strip.
 The public gtag-esp32-c3-wifi.yaml asset instead fetches a pinned GitHub package.
 Do not share filled-in secrets.yaml or a wizard YAML containing credentials.
 
-Hardware test on a physical ESP32-C3 is still pending for 1.1.0-beta.1.
-Full instructions: https://github.com/lukdut/gtag-nrf-display/blob/v1.1.0-beta.1/docs/esp32-wifi.md
+Hardware test on a physical ESP32-C3 is still pending for 1.1.0-beta.2.
+Full instructions: https://github.com/lukdut/gtag-nrf-display/blob/v1.1.0-beta.2/docs/esp32-wifi.md
 """
 
 

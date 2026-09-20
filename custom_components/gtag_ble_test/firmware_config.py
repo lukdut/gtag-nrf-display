@@ -13,7 +13,7 @@ from typing import Any
 # nRF52840 firmware is unchanged. Keep its wizard on the tested firmware tag;
 # the ESP32 profile has a separate release pin.
 FIRMWARE_TAG = "v0.9.0"
-WIFI_FIRMWARE_TAG = "v1.1.0-beta.1"
+WIFI_FIRMWARE_TAG = "v1.1.0-beta.2"
 PACKAGE_ROOT = "github://lukdut/gtag-nrf-display/config/esphome/packages"
 LCD_PINS = ("dio_pin", "clk_pin", "cs_pin", "reset_pin")
 RESERVED_GPIO = {0, 1, 9, 10, 18}

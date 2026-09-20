@@ -6,7 +6,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/lukdut/gtag-nrf-display.git
-      ref: v1.1.0-beta.1
+      ref: v1.1.0-beta.2
       path: config/esphome/components
     refresh: never
     components: [gtag_display]
