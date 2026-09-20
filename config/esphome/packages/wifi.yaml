@@ -1,6 +1,6 @@
-# Public BLE package. Pin both this package and its C++ component to one release.
+# USB-powered ESP32-C3 profile, pinned to the matching component release.
 packages:
-  gtag_base: !include ble-base.yaml
+  gtag_base: !include wifi-base.yaml
 
 external_components:
   - source:

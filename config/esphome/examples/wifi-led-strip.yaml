@@ -1,0 +1,13 @@
+# Include this alongside the Wi-Fi display package in the device YAML.
+# GPIO5 is free in the ESP32-C3 Super Mini example. Size/power to your strip.
+light:
+  - platform: esp32_rmt_led_strip
+    id: display_backlight
+    name: "Display backlight"
+    pin: GPIO5
+    num_leds: 30
+    chipset: WS2812
+    channel_colors: GRB
+    effects:
+      - addressable_rainbow:
+      - addressable_scan:

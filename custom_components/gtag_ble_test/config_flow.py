@@ -18,7 +18,7 @@ from homeassistant.helpers import entity_registry as er, selector
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_TRANSPORT, DOMAIN, SERVICE_UUID, TRANSPORT_BLE, TRANSPORT_ZIGBEE
+from .const import CONF_TRANSPORT, DOMAIN, SERVICE_UUID, TRANSPORT_BLE, TRANSPORT_ZIGBEE, TRANSPORT_WIFI
 from .firmware_flow import FirmwareWizardMixin
 from .diagnostic_flow import DiagnosticFlowMixin
 from .layout_flow import LayoutTransferMixin, excluded_entities
@@ -77,7 +77,36 @@ class GTagBLETestConfigFlow(FirmwareWizardMixin, ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="user", menu_options=["ble", "zigbee", "firmware"])
+        return self.async_show_menu(step_id="user", menu_options=["ble", "zigbee", "wifi", "firmware"])
+
+    async def async_step_wifi(self, user_input=None) -> ConfigFlowResult:
+        from types import SimpleNamespace
+        from .wifi import WifiTransport, available_devices
+
+        configured = self._async_current_ids(include_ignore=False)
+        devices = {key: entry for key, entry in available_devices(self.hass).items()
+                   if f"wifi:{entry.unique_id}" not in configured}
+        errors = {}
+        if user_input is not None:
+            linked = devices.get(user_input["esphome_entry_id"])
+            if linked is None:
+                errors["base"] = "no_wifi_devices"
+            else:
+                data = {CONF_TRANSPORT: TRANSPORT_WIFI, CONF_ADDRESS: linked.unique_id,
+                        "esphome_entry_id": linked.entry_id}
+                try:
+                    await WifiTransport(self.hass, SimpleNamespace(data=data)).async_check_connection()
+                except (HomeAssistantError, TimeoutError):
+                    errors["base"] = "cannot_connect"
+                else:
+                    await self.async_set_unique_id(f"wifi:{linked.unique_id}")
+                    self._abort_if_unique_id_configured()
+                    return self.async_create_entry(title=linked.title, data=data)
+        if not devices and not errors:
+            errors["base"] = "no_wifi_devices"
+        return self.async_show_form(step_id="wifi", data_schema=vol.Schema({
+            vol.Required("esphome_entry_id"): vol.In({key: entry.title for key, entry in devices.items()}),
+        }), errors=errors)
 
     async def async_step_zigbee(
         self, user_input: dict[str, Any] | None = None

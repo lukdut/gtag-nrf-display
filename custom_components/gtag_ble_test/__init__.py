@@ -1,4 +1,4 @@
-"""GTag display integration for Bluetooth and Zigbee2MQTT."""
+"""GTag display integration for Bluetooth, Zigbee2MQTT and ESPHome Wi-Fi."""
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
@@ -10,7 +10,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.setup import async_setup_component
 import voluptuous as vol
 
-from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_ZIGBEE
+from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_ZIGBEE, TRANSPORT_WIFI
 from .display import Display
 from .render import LAYOUT_SCHEMA
 
@@ -62,6 +62,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         if not await mqtt.async_wait_for_mqtt_client(hass):
             raise ConfigEntryNotReady("Configure the MQTT integration to use Zigbee2MQTT")
+    elif entry.data.get(CONF_TRANSPORT) == TRANSPORT_WIFI:
+        linked = hass.config_entries.async_get_entry(entry.data["esphome_entry_id"])
+        if linked is None or linked.domain != "esphome":
+            raise ConfigEntryNotReady("Add the linked device to ESPHome first")
     elif not await async_setup_component(hass, "bluetooth", {}):
         raise ConfigEntryNotReady("Bluetooth is not ready")
     display = entry.runtime_data = Display(hass, entry)

@@ -408,7 +408,7 @@ async def test_flow_selects_transport_and_discovers_by_ieee(hass, broker, monkey
     monkeypatch.setattr("custom_components.gtag_ble_test.async_setup_entry", AsyncMock(return_value=True))
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     assert result["type"] == "menu"
-    assert result["menu_options"] == ["ble", "zigbee", "firmware"]
+    assert result["menu_options"] == ["ble", "zigbee", "wifi", "firmware"]
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "zigbee"})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"base_topic": "zigbee2mqtt"})
     assert result["step_id"] == "zigbee_device"

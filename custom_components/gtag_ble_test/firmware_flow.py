@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from html import escape
 import secrets
+import base64
 from typing import Any
 
 import voluptuous as vol
@@ -11,8 +12,8 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
 
 from .firmware_config import (
-    BOARDS, FIRMWARE_TAG, LCD_PINS, FirmwareConfigError, hardware_defaults,
-    render_firmware_yaml, validate_battery, validate_device, validate_pins,
+    BOARDS, FIRMWARE_TAG, WIFI_FIRMWARE_TAG, LCD_PINS, FirmwareConfigError, hardware_defaults,
+    render_firmware_yaml, validate_battery, validate_device, validate_pins, validate_wifi,
 )
 from .firmware_download import async_prepare_download
 
@@ -56,7 +57,7 @@ class FirmwareWizardMixin:
                 return await self.async_step_firmware_pins()
         schema = vol.Schema({
             vol.Required("board"): select(list(BOARDS), "firmware_board"),
-            vol.Required("transport"): select(["zigbee", "ble"], "firmware_transport"),
+            vol.Required("transport"): select(["zigbee", "ble", "wifi"], "firmware_transport"),
             vol.Required("name"): selector.TextSelector(),
             vol.Required("friendly_name"): selector.TextSelector(),
         })
@@ -76,15 +77,35 @@ class FirmwareWizardMixin:
             else:
                 if self._firmware_settings["battery_enabled"]:
                     return await self.async_step_firmware_battery()
+                if self._firmware_settings["transport"] == "wifi":
+                    return await self.async_step_firmware_wifi()
                 return await self.async_step_firmware_download()
         schema = vol.Schema({
             **{vol.Required(field): selector.TextSelector() for field in LCD_PINS},
-            vol.Required("battery_enabled"): selector.BooleanSelector(),
+            **({vol.Required("battery_enabled"): selector.BooleanSelector()}
+               if settings["transport"] != "wifi" else {}),
         })
         return self.async_show_form(
             step_id="firmware_pins", data_schema=self.add_suggested_values_to_schema(schema, user_input or settings),
             errors=errors, last_step=False,
         )
+
+    async def async_step_firmware_wifi(self, user_input=None) -> ConfigFlowResult:
+        settings = self._firmware_settings
+        settings.setdefault("api_key", base64.b64encode(secrets.token_bytes(32)).decode("ascii"))
+        settings.setdefault("ota_password", secrets.token_urlsafe(24))
+        errors = {}
+        if user_input is not None:
+            try:
+                self._firmware_settings = validate_wifi({**settings, **user_input})
+            except FirmwareConfigError as err:
+                errors = err.errors
+            else:
+                return await self.async_step_firmware_download()
+        return self.async_show_form(step_id="firmware_wifi", data_schema=vol.Schema({
+            vol.Required("wifi_ssid", default=settings.get("wifi_ssid", "")): selector.TextSelector(),
+            vol.Required("wifi_password"): selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)),
+        }), errors=errors, last_step=False)
 
     async def async_step_firmware_battery(self, user_input: dict | None = None) -> ConfigFlowResult:
         settings = self._firmware_settings
@@ -125,7 +146,8 @@ class FirmwareWizardMixin:
             url = ""
             errors["base"] = "firmware_download_unavailable"
         placeholders = {
-            "download_url": url, "filename": filename, "yaml": yaml, "firmware_tag": FIRMWARE_TAG,
+            "download_url": url, "filename": filename, "yaml": yaml,
+            "firmware_tag": WIFI_FIRMWARE_TAG if self._firmware_settings["transport"] == "wifi" else FIRMWARE_TAG,
             # HA parses translations as ICU messages before rendering Markdown.
             # HTML attributes must arrive as values, not as translation syntax.
             "download_link_start": f'<a href="{escape(url, quote=True)}" target="_blank">' if url else "",

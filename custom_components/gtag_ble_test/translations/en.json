@@ -55,7 +55,8 @@
         "menu_options": {
           "ble": "Bluetooth",
           "zigbee": "Zigbee2MQTT",
-          "firmware": "Prepare firmware (ESPHome YAML)"
+          "firmware": "Prepare firmware (ESPHome YAML)",
+          "wifi": "Wi-Fi (ESPHome)"
         }
       },
       "ble": {
@@ -79,7 +80,7 @@
       },
       "firmware": {
         "title": "Prepare firmware",
-        "description": "Prepare a YAML configuration for ESPHome Device Builder 2026.9.0. Select the profile matching your board and bootloader. Compile and download the UF2 in ESPHome.",
+        "description": "Create YAML for ESPHome Device Builder 2026.9.0. Flash nRF52840 using UF2; flash ESP32-C3 over USB with ESPHome, then over Wi-Fi (OTA).",
         "data": {
           "board": "Board and bootloader",
           "transport": "Connection type",
@@ -88,12 +89,12 @@
         },
         "data_description": {
           "name": "A unique name for each display: 1–31 lowercase letters, digits or hyphens; no leading or trailing hyphen.",
-          "board": "Pro Micro / Super Mini: nice!nano S140 6.x bootloader. Super52840: stock XIAO S140 7.x, currently Zigbee only."
+          "board": "Pro Micro / Super Mini: nice!nano S140 6.x bootloader. Super52840: stock XIAO S140 7.x, currently Zigbee only. ESP32-C3 Super Mini: Wi-Fi, USB."
         }
       },
       "firmware_pins": {
         "title": "Display wiring",
-        "description": "Check every GPIO against your wiring. Use P0.11 or P1.04 notation. Keep LCD power, common GND and the original DisplayCLK/S1 clock connected. Enable battery measurement only with an external 1 MΩ / 1 MΩ divider.",
+        "description": "Match your wiring: P0.11 / P1.04 for nRF52840, GPIO0 / GPIO1 for ESP32-C3. Keep LCD power, common GND and the original DisplayCLK/S1 clock. ESP32-C3 uses USB power; keep GPIO18/19 free for USB.",
         "data": {
           "dio_pin": "DIO",
           "clk_pin": "CLK",
@@ -120,9 +121,24 @@
       },
       "firmware_download": {
         "title": "Configuration ready",
-        "description": "{download_link_start}Download {filename}{download_link_end}\n\nFirmware: **{firmware_tag}**. Use the link above to download. Submit performs the selected action; finishing shows the link again on the final screen and keeps it available for 20 minutes.\n\nCreate a configuration in ESPHome Device Builder and paste the YAML from the file. Select **Install → Manual download**, download the UF2 and copy it to the board bootloader drive. Zigbee also needs the converter from the same release. Then add the flashed display in GTag Display through Bluetooth or Zigbee2MQTT.\n\nYou can also copy the YAML:\n\n```yaml\n{yaml}\n```",
+        "description": "{download_link_start}Download {filename}{download_link_end}\n\nFirmware: **{firmware_tag}**. Use the link above to download. Submit performs the selected action; finishing shows the link again on the final screen and keeps it available for 20 minutes.\n\nCreate a configuration in ESPHome Device Builder and paste the YAML. For nRF52840, download the UF2 and copy it to the bootloader drive; Zigbee needs the matching converter. For ESP32-C3, install over USB with ESPHome, then add the device to ESPHome and GTag Display → Wi-Fi. Later firmware updates can use Wi-Fi OTA.\n\nYou can also copy the YAML:\n\n```yaml\n{yaml}\n```",
         "data": {
           "action": "Next step"
+        }
+      },
+      "wifi": {
+        "title": "Connect through Wi-Fi",
+        "description": "First flash the ESP32-C3 and add it to the standard ESPHome integration. Connected devices with GTag Wi-Fi firmware appear here.",
+        "data": {
+          "esphome_entry_id": "ESPHome device"
+        }
+      },
+      "firmware_wifi": {
+        "title": "Wi-Fi network",
+        "description": "An API encryption key and OTA password are generated automatically. The downloaded YAML contains credentials; keep it private.",
+        "data": {
+          "wifi_ssid": "Network name (SSID)",
+          "wifi_password": "Wi-Fi password"
         }
       }
     },
@@ -139,8 +155,8 @@
       "no_zigbee_devices": "No new GTag displays found. Check pairing and Frame_V1 firmware.",
       "converter_update_required": "Update the gtag-display.mjs external converter in Zigbee2MQTT from this package.",
       "invalid_board": "Select a supported board.",
-      "invalid_transport": "Select Bluetooth or Zigbee.",
-      "unsupported_profile": "Only Zigbee is currently available for Super52840.",
+      "invalid_transport": "Choose Bluetooth, Zigbee or Wi-Fi.",
+      "unsupported_profile": "Choose Wi-Fi for ESP32-C3, Bluetooth or Zigbee for Pro Micro, or Zigbee for Super52840.",
       "invalid_device_name": "Use 1–31 lowercase letters, digits or hyphens; no leading or trailing hyphen.",
       "invalid_friendly_name": "Enter 1–80 characters without line breaks or ESPHome substitutions.",
       "invalid_gpio": "Use P0.00…P0.31 or P1.00…P1.15.",
@@ -150,7 +166,11 @@
       "invalid_settings": "Check the allowed value range.",
       "invalid_full_voltage": "The 100% threshold must exceed the 0% threshold by at least 1 mV.",
       "invalid_recovery_voltage": "Recovery must be above the 0% threshold and at most the 100% threshold.",
-      "firmware_download_unavailable": "Unable to create the download link. Copy the YAML below or refresh the link."
+      "firmware_download_unavailable": "Unable to create the download link. Copy the YAML below or refresh the link.",
+      "no_wifi_devices": "No GTag Wi-Fi devices available. Add the flashed board to ESPHome and wait for it to connect.",
+      "usb_power_only": "ESP32-C3 uses USB power.",
+      "invalid_esp32_gpio": "Use a free GPIO0, 1, 3–7, 10, 20 or 21; USB and boot strapping pins are reserved.",
+      "invalid_wifi_settings": "Check the network name and Wi-Fi password (8–63 bytes)."
     }
   },
   "options": {
@@ -319,13 +339,15 @@
     "firmware_board": {
       "options": {
         "promicro": "Pro Micro / Super Mini / nice!nano — S140 6.x",
-        "super52840": "Super52840 — XIAO S140 7.x bootloader"
+        "super52840": "Super52840 — XIAO S140 7.x bootloader",
+        "esp32c3_supermini": "ESP32-C3 Super Mini (USB, Wi-Fi)"
       }
     },
     "firmware_transport": {
       "options": {
         "ble": "Bluetooth",
-        "zigbee": "Zigbee2MQTT"
+        "zigbee": "Zigbee2MQTT",
+        "wifi": "Wi-Fi (ESPHome)"
       }
     },
     "firmware_action": {

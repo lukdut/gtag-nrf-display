@@ -8,7 +8,11 @@ namespace esphome::gtag_display::firmware_info {
 // Firmware version is independent of the HA integration and ESPHome versions.
 // Bump for every published firmware; capabilities, not version comparisons,
 // decide which packets a host may send.
+#ifdef USE_GTAG_WIFI
+inline constexpr char VERSION[] = "1.1.0-beta.1";
+#else
 inline constexpr char VERSION[] = "0.9.0";
+#endif
 constexpr uint8_t SCHEMA = 1;
 constexpr uint8_t ZIGBEE_OPCODE = 7;
 constexpr size_t SIZE = 40;
@@ -30,7 +34,9 @@ inline void make(uint8_t *out) {
   write16(out + 12, 256);
   write16(out + 14, 128);
   write16(out + 16, frame::MAX_ENCODED_SIZE);
-#ifdef USE_GTAG_ZIGBEE
+#ifdef USE_GTAG_WIFI
+  write16(out + 18, frame::MAX_ENCODED_SIZE);
+#elif defined(USE_GTAG_ZIGBEE)
   write16(out + 18, 32);
 #else
   write16(out + 18, 18);

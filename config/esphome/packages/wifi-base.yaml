@@ -1,0 +1,80 @@
+# USB-powered ESP32 profile. API, Wi-Fi, logging and OTA remain normal ESPHome
+# components; user YAML can add lights, sensors, buses and additional actions.
+substitutions:
+  gtag_name: gtag-esp32-display
+  gtag_friendly_name: GTag Display
+
+esphome:
+  name: ${gtag_name}
+  friendly_name: ${gtag_friendly_name}
+  min_version: 2026.9.0
+
+esp32:
+  board: esp32-c3-devkitm-1
+  variant: ESP32C3
+  framework:
+    type: esp-idf
+
+logger:
+
+ota:
+  - platform: esphome
+
+gtag_display:
+  id: gtag_lcd
+  transport: wifi
+  boot_test_pattern: logo
+  battery_voltage:
+    enabled: false
+
+api:
+  actions:
+    - action: gtag_info
+      supports_response: only
+      then:
+        - api.respond:
+            data: !lambda |-
+              root["info"] = id(gtag_lcd).info_hex();
+              root["wifi_protocol"] = 1;
+    - action: gtag_frame
+      supports_response: only
+      variables:
+        payload: string
+        version: int
+        codec: int
+        frame_id: string
+        crc32: string
+        freshness_timeout: int
+      then:
+        - if:
+            condition:
+              lambda: return id(gtag_lcd).submit(payload, version, codec, frame_id, crc32, freshness_timeout);
+            then:
+              - wait_until:
+                  condition:
+                    lambda: return !id(gtag_lcd).busy();
+                  timeout: 10s
+              - api.respond:
+                  success: !lambda return id(gtag_lcd).rendered(frame_id, crc32);
+                  error_message: "display_not_rendered"
+                  data: !lambda |-
+                    root["frame_id"] = frame_id;
+                    root["crc32"] = crc32;
+                    root["rendered"] = id(gtag_lcd).rendered(frame_id, crc32);
+            else:
+              - api.respond:
+                  success: false
+                  error_message: !lambda return id(gtag_lcd).error();
+    - action: gtag_confirm
+      supports_response: only
+      variables:
+        frame_id: string
+        crc32: string
+        sequence: string
+      then:
+        - api.respond:
+            data: !lambda |-
+              root["confirmed"] = id(gtag_lcd).confirm(frame_id, crc32, sequence);
+              root["frame_id"] = frame_id;
+              root["crc32"] = crc32;
+              root["sequence"] = sequence;

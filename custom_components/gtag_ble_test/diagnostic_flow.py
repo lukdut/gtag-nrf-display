@@ -42,7 +42,7 @@ class DiagnosticFlowMixin:
         features = info.get("firmware_features")
         legacy = info.get("firmware_legacy")
         placeholders = {
-            "transport": "Zigbee2MQTT" if display.zigbee else "Bluetooth",
+            "transport": {"zigbee": "Zigbee2MQTT", "ble": "Bluetooth", "wifi": "Wi-Fi (ESPHome)"}[display.transport],
             "firmware": safe_text(label("legacy") if legacy else info.get("firmware_version") or label("unknown")),
             "features": (label("unknown") if features is None or legacy else
                          "_".join(features) or label("none")),

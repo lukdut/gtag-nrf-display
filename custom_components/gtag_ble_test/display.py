@@ -20,7 +20,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_BLE, TRANSPORT_ZIGBEE
+from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_BLE, TRANSPORT_ZIGBEE, TRANSPORT_WIFI
 from .battery import BatteryMonitor
 from .connection import ConnectionCheck
 from .frame_protocol import PreparedFrame
@@ -51,7 +51,7 @@ class Display:
         self.entry_id = entry.entry_id
         self.address = entry.data[CONF_ADDRESS]
         self.transport = entry.data.get(CONF_TRANSPORT, TRANSPORT_BLE)
-        self.identity = f"zigbee:{self.address}" if self.transport == TRANSPORT_ZIGBEE else self.address
+        self.identity = f"{self.transport}:{self.address}" if self.transport != TRANSPORT_BLE else self.address
         self.name = entry.title
         self.clock_enabled = False
         self.auto_update = True
@@ -88,16 +88,21 @@ class Display:
         self._freshness_unsubscribe = None
         self._last_check = float("-inf")
         self.zigbee = None
+        self.wifi = None
         if self.transport == TRANSPORT_ZIGBEE:
             from .zigbee import ZigbeeTransport
 
             self.zigbee = ZigbeeTransport(hass, entry, self._notify, self._on_link_restored)
-        self.battery = self.zigbee or BatteryMonitor(hass, self.address, self._notify)
+        if self.transport == TRANSPORT_WIFI:
+            from .wifi import WifiTransport
+            self.wifi = WifiTransport(hass, entry)
+        self.network = self.zigbee or self.wifi
+        self.battery = self.network or BatteryMonitor(hass, self.address, self._notify)
         self.connection_check = ConnectionCheck(self)
 
     @property
     def device_firmware_info(self) -> dict:
-        return self.zigbee.firmware_info if self.zigbee is not None else self.firmware_info
+        return self.network.firmware_info if self.network is not None else self.firmware_info
 
     @property
     def update_interval(self) -> float:
@@ -243,8 +248,8 @@ class Display:
         if self.transport == TRANSPORT_BLE:
             frame_id = int(frame_id, 16)
         crc = int(self.report["raw_crc32"], 16)
-        if self.zigbee is not None:
-            await self.zigbee.async_confirm(frame_id, crc, self._freshness_sequence)
+        if self.network is not None:
+            await self.network.async_confirm(frame_id, crc, self._freshness_sequence)
         else:
             await renew_freshness(self.hass, self.address, frame_id, crc, self._freshness_sequence)
         self._confirmed_at = started
@@ -448,8 +453,8 @@ class Display:
                     sent_timeout = self.freshness_timeout
                     self.status = "sending"
                     self._notify()
-                    if self.zigbee is not None:
-                        report_attributes = await self.zigbee.async_send(frame.raw, sent_timeout)
+                    if self.network is not None:
+                        report_attributes = await self.network.async_send(frame.raw, sent_timeout)
                     else:
                         prepared = await self.hass.async_add_executor_job(PreparedFrame.prepare, frame.raw)
                         async with get_operation_lock(self.hass, self.address):

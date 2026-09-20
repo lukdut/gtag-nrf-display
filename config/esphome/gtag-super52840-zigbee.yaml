@@ -5,9 +5,9 @@ substitutions:
   gtag_friendly_name: GTag Super52840
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v1.0.1
-  board: github://lukdut/gtag-nrf-display/config/esphome/packages/super52840.yaml@v1.0.1
-  no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v1.0.1
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee.yaml@v1.1.0-beta.1
+  board: github://lukdut/gtag-nrf-display/config/esphome/packages/super52840.yaml@v1.1.0-beta.1
+  no_battery: github://lukdut/gtag-nrf-display/config/esphome/packages/zigbee-no-battery.yaml@v1.1.0-beta.1
 
 # Explicit hardware settings; no external battery divider is fitted.
 gtag_display:

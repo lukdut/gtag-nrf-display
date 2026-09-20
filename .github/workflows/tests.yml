@@ -21,7 +21,24 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install esphome==2026.9.0
       - name: Public YAML, documentation, GPIO validation and code generation
-        run: python tests/esphome/test_pin_config.py -v
+        run: python -m unittest discover -s tests/esphome -v
+  esp32-c3-firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install esphome==2026.9.0
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/esphome/idf
+          key: idf-${{ runner.os }}-${{ runner.arch }}-5.5.5-esphome-2026.9.0
+      - name: Compile ESP32-C3 display, encrypted API, OTA and WS2812 effects
+        run: python tests/container/build_wifi.py --build-dir /tmp/gtag-wifi-build
   test:
     runs-on: ubuntu-latest
     steps:

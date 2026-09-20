@@ -55,7 +55,8 @@
         "menu_options": {
           "ble": "Bluetooth",
           "zigbee": "Zigbee2MQTT",
-          "firmware": "Подготовить прошивку (YAML для ESPHome)"
+          "firmware": "Подготовить прошивку (YAML для ESPHome)",
+          "wifi": "Wi-Fi (ESPHome)"
         }
       },
       "ble": {
@@ -79,7 +80,7 @@
       },
       "firmware": {
         "title": "Подготовить прошивку",
-        "description": "Мастер подготовит YAML для ESPHome Device Builder 2026.9.0. Выберите профиль, соответствующий плате и её загрузчику. Сборка и скачивание UF2 выполняются в ESPHome.",
+        "description": "Создайте YAML для ESPHome Device Builder 2026.9.0. nRF52840 прошивается файлом UF2, ESP32-C3 — через USB средствами ESPHome, затем по Wi-Fi (OTA).",
         "data": {
           "board": "Плата и загрузчик",
           "transport": "Способ связи",
@@ -88,12 +89,12 @@
         },
         "data_description": {
           "name": "Уникальное имя для каждого экрана: 1–31 символ, строчные латинские буквы, цифры и дефисы; без дефиса в начале и конце.",
-          "board": "Pro Micro / Super Mini: загрузчик nice!nano S140 6.x. Super52840: штатный XIAO S140 7.x, пока только Zigbee."
+          "board": "Pro Micro / Super Mini: загрузчик nice!nano S140 6.x. Super52840: штатный XIAO S140 7.x, пока только Zigbee. ESP32-C3 Super Mini: Wi-Fi, USB."
         }
       },
       "firmware_pins": {
         "title": "Подключение экрана",
-        "description": "Сверьте каждый GPIO со своей проводкой. Формат: P0.11 или P1.04. Питание LCD, общая GND и штатное тактирование DisplayCLK/S1 должны быть сохранены. Включайте измерение батареи только при наличии внешнего делителя 1 МОм / 1 МОм.",
+        "description": "Укажите GPIO по своей схеме: P0.11 / P1.04 для nRF52840, GPIO0 / GPIO1 для ESP32-C3. Сохраните питание экрана, общую GND и штатное тактирование DisplayCLK/S1. ESP32-C3 питается от USB; GPIO18/19 оставьте для USB.",
         "data": {
           "dio_pin": "DIO",
           "clk_pin": "CLK",
@@ -120,9 +121,24 @@
       },
       "firmware_download": {
         "title": "Конфигурация готова",
-        "description": "{download_link_start}Скачать {filename}{download_link_end}\n\nПрошивка: **{firmware_tag}**. Для скачивания нажмите ссылку выше. Кнопка Submit выполняет выбранное действие; при завершении ссылка появится ещё раз на итоговом экране и будет доступна 20 минут.\n\nВ ESPHome Device Builder создайте конфигурацию и вставьте YAML из файла. Выберите **Install → Manual download**, скачайте UF2 и скопируйте его на диск загрузчика платы. Для Zigbee нужен конвертер из того же релиза. Затем добавьте прошитый экран в GTag Display через Bluetooth или Zigbee2MQTT.\n\nМожно также скопировать YAML:\n\n```yaml\n{yaml}\n```",
+        "description": "{download_link_start}Скачать {filename}{download_link_end}\n\nПрошивка: **{firmware_tag}**. Для скачивания нажмите ссылку выше. Кнопка Submit выполняет выбранное действие; при завершении ссылка появится ещё раз на итоговом экране и будет доступна 20 минут.\n\nСоздайте конфигурацию в ESPHome Device Builder и вставьте YAML. Для nRF52840 скачайте UF2 и скопируйте на диск загрузчика; Zigbee требует конвертер той же версии. Для ESP32-C3 выполните первую установку через USB средствами ESPHome, затем добавьте устройство в интеграции ESPHome и GTag Display → Wi-Fi. Последующие прошивки можно устанавливать по Wi-Fi.\n\nМожно также скопировать YAML:\n\n```yaml\n{yaml}\n```",
         "data": {
           "action": "Дальше"
+        }
+      },
+      "wifi": {
+        "title": "Подключение по Wi-Fi",
+        "description": "Сначала прошейте ESP32-C3 и добавьте его в стандартную интеграцию ESPHome. Здесь отображаются подключённые устройства с прошивкой GTag Wi-Fi.",
+        "data": {
+          "esphome_entry_id": "Устройство ESPHome"
+        }
+      },
+      "firmware_wifi": {
+        "title": "Сеть Wi-Fi",
+        "description": "Ключ шифрования API и пароль OTA генерируются автоматически. Скачанный YAML содержит пароли — храните его как приватную конфигурацию.",
+        "data": {
+          "wifi_ssid": "Имя сети (SSID)",
+          "wifi_password": "Пароль Wi-Fi"
         }
       }
     },
@@ -139,8 +155,8 @@
       "no_zigbee_devices": "Новых GTag-экранов не найдено. Проверьте сопряжение и прошивку Frame_V1.",
       "converter_update_required": "Обновите внешний конвертер gtag-display.mjs в Zigbee2MQTT из этого комплекта.",
       "invalid_board": "Выберите поддерживаемую плату.",
-      "invalid_transport": "Выберите Bluetooth или Zigbee.",
-      "unsupported_profile": "Для Super52840 пока доступен только Zigbee.",
+      "invalid_transport": "Выберите Bluetooth, Zigbee или Wi-Fi.",
+      "unsupported_profile": "Выберите Wi-Fi для ESP32-C3, Bluetooth или Zigbee для Pro Micro, Zigbee для Super52840.",
       "invalid_device_name": "Нужно 1–31 строчных латинских букв, цифр или дефисов; без дефиса в начале и конце.",
       "invalid_friendly_name": "Введите 1–80 символов без переносов строк и подстановок ESPHome.",
       "invalid_gpio": "Укажите GPIO в формате P0.00…P0.31 или P1.00…P1.15.",
@@ -150,7 +166,11 @@
       "invalid_settings": "Проверьте допустимый диапазон значения.",
       "invalid_full_voltage": "Порог 100% должен быть выше порога 0% минимум на 1 мВ.",
       "invalid_recovery_voltage": "Порог восстановления должен быть выше порога 0% и не выше порога 100%.",
-      "firmware_download_unavailable": "Не удалось создать ссылку. Скопируйте YAML ниже или обновите ссылку."
+      "firmware_download_unavailable": "Не удалось создать ссылку. Скопируйте YAML ниже или обновите ссылку.",
+      "no_wifi_devices": "Нет доступных GTag Wi-Fi. Добавьте прошитую плату в интеграцию ESPHome и дождитесь подключения.",
+      "usb_power_only": "ESP32-C3 использует питание от USB.",
+      "invalid_esp32_gpio": "Используйте свободный GPIO0, 1, 3–7, 10, 20 или 21; USB и загрузочные пины зарезервированы.",
+      "invalid_wifi_settings": "Проверьте имя сети и пароль Wi-Fi (8–63 байта)."
     }
   },
   "options": {
@@ -319,13 +339,15 @@
     "firmware_board": {
       "options": {
         "promicro": "Pro Micro / Super Mini / nice!nano — S140 6.x",
-        "super52840": "Super52840 — загрузчик XIAO S140 7.x"
+        "super52840": "Super52840 — загрузчик XIAO S140 7.x",
+        "esp32c3_supermini": "ESP32-C3 Super Mini (USB, Wi-Fi)"
       }
     },
     "firmware_transport": {
       "options": {
         "ble": "Bluetooth",
-        "zigbee": "Zigbee2MQTT"
+        "zigbee": "Zigbee2MQTT",
+        "wifi": "Wi-Fi (ESPHome)"
       }
     },
     "firmware_action": {

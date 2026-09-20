@@ -61,14 +61,14 @@ class ConnectionCheck:
             if display.status == "sending":
                 raise ConnectionCheckError("device_busy")
             async with asyncio.timeout(60):
-                info = (await display.zigbee.async_check_connection() if display.zigbee is not None
+                info = (await display.network.async_check_connection() if display.network is not None
                         else await check_connection(display.hass, display.address))
-            if display.zigbee is not None:
-                display.zigbee.firmware_info = info.attributes()
+            if display.network is not None:
+                display.network.firmware_info = info.attributes()
             else:
                 display.firmware_info = info.attributes()
             try:
-                info.validate_transfer(18 if display.zigbee is None else 1)
+                info.validate_transfer(18 if display.network is None else 1)
             except ValueError as err:
                 raise ConnectionCheckError("incompatible_firmware", str(err)) from err
             self.status = "ok"

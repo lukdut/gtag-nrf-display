@@ -1,3 +1,5 @@
+#include "esphome/core/defines.h"
+#ifndef USE_ESP32
 #include "gtag_display.h"
 #include "boot_logo.h"
 #include "firmware_info.h"
@@ -1115,3 +1117,4 @@ void GTagDisplay::dump_config() {
 
 }  // namespace gtag_display
 }  // namespace esphome
+#endif

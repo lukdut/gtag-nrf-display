@@ -1,4 +1,4 @@
-"""Shared G-Tag LCD/ADC driver with BLE and experimental Zigbee profiles."""
+"""G-Tag LCD profiles: nRF52840 BLE/Zigbee and USB-powered ESP32 Wi-Fi."""
 import re
 import voluptuous as vol
 
@@ -13,14 +13,12 @@ from esphome.components.zephyr import zephyr_add_overlay, zephyr_add_prj_conf
 from esphome.components.nrf52.const import AIN_TO_GPIO
 from esphome.components.nrf52.gpio import validate_gpio_pin
 
-DEPENDENCIES = ["nrf52"]
+DEPENDENCIES = []
 CONFLICTS_WITH = [
     "bthome",
     "gtag_ble_test",
     "lcd_standalone",
     "lcd_gpio_guard",
-    "spi",
-    "i2c",
 ]
 MULTI_CONF = False
 
@@ -70,6 +68,14 @@ def gpio_number(value):
     return number
 
 
+def lcd_pin(value):
+    if CORE.is_esp32:
+        if not isinstance(value, (str, int)) or isinstance(value, bool):
+            raise cv.Invalid("Use a GPIO number; LCD mode and inversion are fixed by the protocol")
+        return pins.internal_gpio_output_pin_schema(value)
+    return pins.internal_gpio_output_pin_number(gpio_number(value))
+
+
 def battery_pin(value):
     number = gpio_number(value)
     if number not in AIN_TO_GPIO.values():
@@ -83,8 +89,10 @@ def validate_pin_assignment(config):
     if config[CONF_BATTERY_VOLTAGE]["enabled"]:
         assignments.append(("battery_voltage.pin", config[CONF_BATTERY_VOLTAGE]["pin"], [CONF_BATTERY_VOLTAGE, "pin"]))
     for name, number, path in assignments:
+        if isinstance(number, dict):
+            number = number["number"]
         if number in used:
-            raise cv.Invalid(f"GPIO P{number // 32}.{number % 32:02d} is already used by {used[number]}", path)
+            raise cv.Invalid(f"GPIO {number} is already used by {used[number]}", path)
         used[number] = name
     return config
 
@@ -117,6 +125,8 @@ def battery_config(value):
         # Package merging may leave enabled-only fields behind; validate them
         # only when measurement is enabled, and never reserve their GPIO.
         return {"enabled": False}
+    if CORE.is_esp32:
+        raise cv.Invalid("The ESP32 Wi-Fi profile uses USB power; set battery_voltage.enabled: false")
     return validate_battery_range(cv.Schema({
         cv.Required("enabled"): cv.boolean,
         cv.Required("pin"): battery_pin,
@@ -132,12 +142,12 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.GenerateID(): cv.declare_id(GTagDisplay),
     cv.GenerateID("zigbee_transport_id"): cv.declare_id(GTagZigbee),
     cv.Optional("zigbee_id"): cv.use_id(ZigbeeComponent),
-    cv.Optional(CONF_TRANSPORT, default="ble"): cv.one_of("ble", "zigbee", lower=True),
+    cv.Optional(CONF_TRANSPORT, default="ble"): cv.one_of("ble", "zigbee", "wifi", lower=True),
     cv.Optional("zigbee_power_diagnostics", default=False): cv.boolean,
     cv.Optional(CONF_TX_POWER, default=0): cv.one_of(0, 4, 8, int=True),
     cv.Optional(CONF_ADVERTISING_INTERVAL, default="1s"): advertising_interval,
     cv.Optional(CONF_BOOT_TEST_PATTERN, default="logo"): cv.enum(BOOT_PATTERNS, lower=True),
-    **{cv.Required(key): cv.All(gpio_number, pins.internal_gpio_output_pin_number)
+    **{cv.Required(key): lcd_pin
        for key in LCD_PINS},
     # B+ -- 1M -- ADC GPIO -- 1M -- GND; 100nF from ADC GPIO to GND.
     cv.Required(CONF_BATTERY_VOLTAGE): battery_config,
@@ -145,6 +155,17 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
 
 
 def validate_transport(config):
+    full = fv.full_config.get()
+    if config[CONF_TRANSPORT] == "wifi":
+        if not CORE.is_esp32 or "wifi" not in full or "api" not in full:
+            raise cv.Invalid("transport: wifi requires ESP32, wifi and api")
+        if "zigbee_id" in config or "zigbee" in full:
+            raise cv.Invalid("The Wi-Fi profile cannot include Zigbee")
+        return config
+    if not CORE.is_nrf52:
+        raise cv.Invalid("BLE and Zigbee profiles require nRF52; use transport: wifi for ESP32")
+    if "spi" in full or "i2c" in full:
+        raise cv.Invalid("The nRF52 battery profile reserves SPI and I2C")
     has_zigbee = "zigbee" in fv.full_config.get()
     if config[CONF_TRANSPORT] == "zigbee" and not has_zigbee:
         raise cv.Invalid("transport: zigbee requires the zigbee component")
@@ -159,6 +180,15 @@ FINAL_VALIDATE_SCHEMA = validate_transport
 
 
 async def to_code(config):
+    if CORE.is_esp32:
+        cg.add_define("USE_GTAG_WIFI")
+        var = cg.new_Pvariable(config[CONF_ID])
+        await cg.register_component(var, config)
+        cg.add(var.set_boot_pattern(config[CONF_BOOT_TEST_PATTERN]))
+        for key in LCD_PINS:
+            pin = await cg.gpio_pin_expression(config[key])
+            cg.add(getattr(var, f"set_{key}")(pin))
+        return
     if not CORE.is_nrf52:
         raise cv.Invalid("gtag_display requires nRF52")
 

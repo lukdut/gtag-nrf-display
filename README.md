@@ -1,4 +1,4 @@
-# GTag Display — nRF52840 + Home Assistant
+# GTag Display — экран электронного ценника для Home Assistant
 
 **GTag Display превращает электронный ценник G-Tag в беспроводной экран
 для Home Assistant.** На нём можно показывать время, погоду, температуру,
@@ -10,6 +10,11 @@
 **Zigbee2MQTT или Bluetooth**. Проект включает прошивку для платы,
 кастомную интеграцию HA и инструкции по подготовке ценника.
 
+В **1.1.0-beta.1** добавлен вариант **ESP32-C3 Super Mini + Wi-Fi**
+с питанием от USB, штатным OTA ESPHome и возможностью добавлять адресную
+ленту, кнопки и датчики через YAML. Этот вариант ожидает
+проверки на физической плате: [подключение и установка ESP32](docs/esp32-wifi.md).
+
 | До: ценник в исходном виде | После: данные Home Assistant на экране |
 |:---:|:---:|
 | ![Электронный ценник G-Tag до переделки](docs/images/project/original-tag.webp) | ![Готовый GTag Display: время, дата, температура и влажность из HA](docs/images/project/ha-display.webp) |
@@ -18,6 +23,9 @@
 [модель для 3D-печати на Thingiverse](https://www.thingiverse.com/thing:7411674).
 
 ## С чего начать
+
+Ниже — порядок для nRF52840. Для ESP32-C3 используйте
+[инструкцию Wi-Fi: подключение, мастер YAML, USB и OTA](docs/esp32-wifi.md).
 
 1. **Подготовьте экран.** Разберите ценник, отделите линии управления
    от штатного контроллера и подключите nRF52840.
@@ -73,9 +81,14 @@
 
 ## Версии и варианты прошивки
 
-Версия **1.0.1** поддерживает оба транспорта. Основная целевая плата —
+Стабильная версия **1.0.1** поддерживает Bluetooth и Zigbee. Основная целевая плата —
 **Pro Micro / nice!nano с Zigbee2MQTT**. Для Super52840 есть отдельная сборка;
 Bluetooth сохраняется как дополнительный профиль.
+
+Предварительный выпуск **[1.1.0-beta.1](https://github.com/lukdut/gtag-nrf-display/releases/tag/v1.1.0-beta.1)**
+добавляет Wi-Fi на ESP32-C3. В HACS выберите эту версию среди предварительных
+выпусков; стабильная ветка остаётся на 1.0.1. Для существующих nRF52840 достаточно
+обновить интеграцию и перезапустить HA, перепрошивка не нужна.
 
 Все варианты используют общий драйвер
 [gtag_display](config/esphome/components/gtag_display).
@@ -85,11 +98,12 @@ Bluetooth сохраняется как дополнительный профи�
 | Bluetooth | [gtag-ble.yaml](config/esphome/gtag-ble.yaml) | [nrf-gtag-display.yaml](config/esphome/nrf-gtag-display.yaml) |
 | Zigbee2MQTT | [gtag-zigbee.yaml](config/esphome/gtag-zigbee.yaml) | [nrf-gtag-zigbee.yaml](config/esphome/nrf-gtag-zigbee.yaml) |
 | Zigbee2MQTT, Super52840 без измерения напряжения | [gtag-super52840-zigbee.yaml](config/esphome/gtag-super52840-zigbee.yaml) | [nrf-gtag-super52840-zigbee.yaml](config/esphome/nrf-gtag-super52840-zigbee.yaml) |
+| Wi-Fi, ESP32-C3 Super Mini, USB (beta) | [gtag-esp32-c3-wifi.yaml](config/esphome/gtag-esp32-c3-wifi.yaml) | [esp32-gtag-display.yaml](config/esphome/esp32-gtag-display.yaml) |
 
 Проверенные версии: HA **2026.9.2**, ESPHome **2026.9.0**, Zigbee2MQTT **2.12.0**,
 NCS **2.9.2**. В простое пользователь измерил около **50 мкА** на основной плате;
 это измерение конкретной сборки, а не гарантия для любой платы и конфигурации.
-[Возможности выпуска](docs/releases/1.0.1.md) · [Проверки и план развития](docs/roadmap.md).
+[Стабильный выпуск](docs/releases/1.0.1.md) · [Wi-Fi beta](docs/releases/1.1.0-beta.1.md) · [Проверки и план развития](docs/roadmap.md).
 Технический домен интеграции `gtag_ble_test` сохранён для совместимости.
 
 В **1.0.1** погодный макет показывает «Ощущается», если источник передаёт это
@@ -194,7 +208,8 @@ gtag_display:
 Создайте устройство в ESPHome Device Builder и скопируйте **полный**
 [gtag-zigbee.yaml](config/esphome/gtag-zigbee.yaml) или
 [gtag-ble.yaml](config/esphome/gtag-ble.yaml). Задайте уникальное имя и проверьте
-GPIO, наличие делителя и пороги батареи. Пакет закреплён на теге `v1.0.1`.
+GPIO, наличие делителя и пороги батареи. Пакет закреплён на теге `v1.1.0-beta.1`;
+прошивка nRF52840 сохраняет версию 0.9.0.
 [Полный пример с объяснениями](docs/device-configuration.md) также показывает,
 как отключить измерение, если делителя нет. Для Zigbee установите
 [внешний конвертер](zigbee2mqtt/gtag-display.mjs) из этого релиза.

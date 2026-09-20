@@ -1,11 +1,12 @@
 {
   "domain": "gtag_ble_test",
   "name": "GTag Display",
-  "version": "1.0.1",
+  "version": "1.1.0-beta.1",
   "config_flow": true,
   "after_dependencies": [
     "bluetooth",
     "mqtt",
+    "esphome",
     "weather",
     "recorder"
   ],
