@@ -11,6 +11,7 @@
 #endif
 
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 
 #ifndef USE_GTAG_ZIGBEE
@@ -769,6 +770,9 @@ bool GTagDisplay::send_frame_(const uint8_t *frame) {
   this->write_(Signal::DIO, false);
 
   ++this->frames_;
+#if defined(USE_GTAG_ZIGBEE) && defined(USE_SENSOR)
+  this->publish_telemetry_();
+#endif
 #ifdef USE_GTAG_BATTERY
   this->shown_battery_pixels_ = battery_pixels;
 #endif
@@ -977,7 +981,27 @@ void GTagDisplay::sample_battery_() {
   }
   // Zephyr's nRF SAADC driver stops and disables the ADC after adc_read().
   // This timer wakes the scheduler once per five minutes, with no polling loop.
+#if defined(USE_GTAG_ZIGBEE) && defined(USE_SENSOR)
+  this->publish_telemetry_();
+#endif
   this->set_timeout("battery_sample", 300000, [this]() { this->sample_battery_(); });
+}
+#endif
+
+#if defined(USE_GTAG_ZIGBEE) && defined(USE_SENSOR)
+void GTagDisplay::publish_telemetry_() {
+  // Low-battery/error startup must not wake the gated Zigbee stack.
+  if (!this->radio_ready()) return;
+  auto publish_changed = [](sensor::Sensor *sensor, float value) {
+    if (sensor == nullptr) return;
+    const float previous = sensor->get_raw_state();
+    if (!sensor->has_state() ||
+        (previous != value && !(std::isnan(previous) && std::isnan(value))))
+      sensor->publish_state(value);
+  };
+  const uint16_t mv = this->battery_mv();
+  publish_changed(this->battery_sensor_, mv == 0xFFFF ? NAN : mv * 0.001f);
+  publish_changed(this->rendered_frames_sensor_, this->frames_);
 }
 #endif
 
@@ -1028,6 +1052,9 @@ void GTagDisplay::setup() {
 #ifdef USE_GTAG_BATTERY
   // 1M || 1M with 100nF settles in ~250ms (5 tau); allow 1s after boot.
   this->set_timeout("battery_sample", 1000, [this]() { this->sample_battery_(); });
+#elif defined(USE_GTAG_ZIGBEE) && defined(USE_SENSOR)
+  // Initialise the counter after all components have installed their callbacks.
+  this->set_timeout("telemetry", 0, [this]() { this->publish_telemetry_(); });
 #endif
 
   ESP_LOGI(TAG, "LCD startup scheduled");

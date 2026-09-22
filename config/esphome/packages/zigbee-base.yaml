@@ -26,6 +26,9 @@ gtag_display:
   transport: zigbee
   zigbee_id: gtag_zigbee
   boot_test_pattern: logo
+  battery_voltage:
+    sensor_id: gtag_battery_sensor
+  rendered_frames_sensor_id: gtag_rendered_sensor
 
 sensor:
   - platform: template
@@ -35,21 +38,15 @@ sensor:
     device_class: voltage
     state_class: measurement
     accuracy_decimals: 3
-    # Read the cache; the shared driver samples the ADC once per five minutes.
-    update_interval: 10s
-    lambda: |-
-      if (!id(gtag_lcd).radio_ready()) return {};
-      const uint16_t mv = id(gtag_lcd).battery_mv();
-      return mv == 0xFFFF ? NAN : mv * 0.001f;
+    # The LCD driver publishes changes after its five-minute ADC measurement.
+    update_interval: never
 
   - platform: template
     id: gtag_rendered_sensor
     name: Rendered frames
     accuracy_decimals: 0
-    update_interval: 5s
-    lambda: |-
-      if (!id(gtag_lcd).radio_ready()) return {};
-      return id(gtag_lcd).rendered_frames();
+    # Published after a successful LCD write; no periodic cache polling.
+    update_interval: never
 
 number:
   - platform: template

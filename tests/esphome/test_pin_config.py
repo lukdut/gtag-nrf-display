@@ -83,6 +83,11 @@ class PinConfigurationTests(unittest.TestCase):
                             self.assertIn("->set_battery_protection(3200, 3400);", code)
                         if transport == "zigbee":
                             self.assertIn("GTag_Display_Frame_V1" if battery else "GTag_Display_Frame_NoBat", code)
+                            self.assertIn("->set_rendered_frames_sensor(gtag_rendered_sensor);", code)
+                            self.assertEqual("->set_battery_sensor(gtag_battery_sensor);" in code, battery)
+                            for sensor_id in (["gtag_battery_sensor"] if battery else []) + ["gtag_rendered_sensor"]:
+                                self.assertIn(f"{sensor_id}->set_update_interval(4294967295UL);", code)
+                                self.assertNotIn(f"{sensor_id}->set_template(", code)
 
     def test_public_release_configurations(self):
         with public_packages() as folder:

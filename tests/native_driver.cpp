@@ -1,6 +1,7 @@
 #include "native_stubs.h"
 #include <memory>
 #include "../config/esphome/components/gtag_display/gtag_display.cpp"
+#include "../config/esphome/components/gtag_display/zigbee_polling.h"
 
 using namespace esphome::gtag_display;
 class TestDisplay : public GTagDisplay {
@@ -13,6 +14,9 @@ class TestDisplay : public GTagDisplay {
   unsigned frames() const { return frames_; }
 };
 static std::unique_ptr<TestDisplay> display;
+#if defined(USE_GTAG_ZIGBEE) && defined(USE_SENSOR)
+static esphome::sensor::Sensor battery_sensor, frames_sensor;
+#endif
 
 static void run_until(uint64_t end_us) {
   for (unsigned steps = 0; steps < 1000; ++steps) {
@@ -70,6 +74,14 @@ static void create_display(unsigned pattern, unsigned interval, unsigned dio, un
   sim::lcd_pins = {{dio, clk, cs, reset}};
   sim::adc_pin = battery_pin;
   display = std::make_unique<TestDisplay>();
+#if defined(USE_GTAG_ZIGBEE) && defined(USE_SENSOR)
+  battery_sensor = {};
+  frames_sensor = {};
+#ifdef USE_GTAG_BATTERY
+  display->set_battery_sensor(&battery_sensor);
+#endif
+  display->set_rendered_frames_sensor(&frames_sensor);
+#endif
   display->set_boot_pattern(static_cast<BootPattern>(pattern));
   display->set_advertising_interval(interval);
   display->set_dio_pin(dio);
@@ -142,6 +154,15 @@ void firmware_race_pattern(unsigned pattern) {
 void firmware_packet(const uint8_t *data, unsigned len, uint8_t *reply) {
   display->process_zigbee_packet(data, len, reply);
 }
+bool firmware_expects_followup(const uint8_t *data, unsigned len, const uint8_t *reply) {
+  return zigbee_frame::expects_followup(data, len, reply);
+}
+#ifdef USE_SENSOR
+unsigned firmware_battery_publications() { return battery_sensor.publications; }
+unsigned firmware_frames_publications() { return frames_sensor.publications; }
+float firmware_battery_published() { return battery_sensor.value; }
+float firmware_frames_published() { return frames_sensor.value; }
+#endif
 #endif
 void firmware_status(uint8_t *out) { display->get_status(out); }
 #ifndef USE_GTAG_ZIGBEE

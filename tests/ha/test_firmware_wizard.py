@@ -62,9 +62,10 @@ async def test_prepare_download_without_radio_or_config_entry(hass, hass_client_
     assert response.headers["Cache-Control"] == "no-store"
     text = await response.text()
     assert text == placeholders["yaml"]
-    assert f"/{transport}.yaml@v0.9.0" in text
+    tag = "v1.1.1" if transport == "zigbee" else "v0.9.0"
+    assert f"/{transport}.yaml@{tag}" in text
     assert "Экран кухни" in text
-    assert ("zigbee-no-battery.yaml@v0.9.0" in text) == (transport == "zigbee" and not battery)
+    assert ("zigbee-no-battery.yaml@v1.1.1" in text) == (transport == "zigbee" and not battery)
     assert ("    pin: P0.31" in text) == battery
     assert ("sd140_v7" in text) == (board == "super52840")
     assert not hass.config_entries.async_entries(DOMAIN)

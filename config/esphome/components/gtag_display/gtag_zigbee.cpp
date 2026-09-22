@@ -4,6 +4,7 @@
 #include <cstring>
 #include "esphome/core/log.h"
 #include "gtag_zigbee_power.h"
+#include "zigbee_polling.h"
 extern "C" {
 #include <zb_nrf_platform.h>
 }
@@ -85,12 +86,6 @@ zb_uint8_t GTagZigbee::handle_packet_(zb_bufid_t buffer) {
   transport->buffer_ = buffer;
   transport->packet_size_ = len - 1;
   std::memcpy(transport->packet_.data(), data + 1, len - 1);
-  if (!zb_get_rx_on_when_idle()) {
-    // Expect the next chunk/status request soon. ZBOSS starts near 100 ms and
-    // backs off automatically if the sender disappears (15 s SDK timeout).
-    // Refresh on each accepted packet, without keeping the receiver awake.
-    zb_zdo_pim_start_turbo_poll_packets(2);
-  }
   transport->phase_.store(Phase::READY);
   transport->enable_loop_soon_any_context();
   return ZB_TRUE;  // The retained buffer belongs to reply_callback_ now.
@@ -113,6 +108,13 @@ void GTagZigbee::loop() {
 }
 
 void GTagZigbee::reply_callback_(zb_uint8_t buffer) {
+  if (!zb_get_rx_on_when_idle() &&
+      zigbee_frame::expects_followup(transport->packet_.data(), transport->packet_size_, transport->reply_.data())) {
+    // Wait for just the next request. Final STATUS, FRESHNESS and rejected
+    // commands must not prolong application-triggered turbo polling.
+    // ZBOSS still controls APS acknowledgements and backs off on a lost sender.
+    zb_zdo_pim_start_turbo_poll_packets(1);
+  }
   send_reply_(buffer, transport->destination_, transport->reply_.data());
   transport->phase_.store(Phase::IDLE);
 }

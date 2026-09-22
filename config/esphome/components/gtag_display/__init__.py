@@ -12,6 +12,7 @@ from esphome.core import CORE
 from esphome.components.zephyr import zephyr_add_overlay, zephyr_add_prj_conf
 from esphome.components.nrf52.const import AIN_TO_GPIO
 from esphome.components.nrf52.gpio import validate_gpio_pin
+from esphome.components import sensor
 
 DEPENDENCIES = []
 CONFLICTS_WITH = [
@@ -118,7 +119,7 @@ def validate_battery_range(config):
 
 def battery_config(value):
     value = cv.Schema({cv.Required("enabled"): cv.boolean}, extra=vol.ALLOW_EXTRA)(value)
-    unknown = set(value) - {"enabled", "pin", CONF_CALIBRATION, "indicator", "empty_voltage", "full_voltage", "recovery_voltage"}
+    unknown = set(value) - {"enabled", "pin", CONF_CALIBRATION, "indicator", "empty_voltage", "full_voltage", "recovery_voltage", "sensor_id"}
     if unknown:
         raise cv.Invalid(f"Unknown battery option: {sorted(unknown)[0]}")
     if not value["enabled"]:
@@ -131,6 +132,7 @@ def battery_config(value):
         cv.Required("enabled"): cv.boolean,
         cv.Required("pin"): battery_pin,
         cv.Required(CONF_CALIBRATION): cv.float_range(min=0.8, max=1.2),
+        cv.Optional("sensor_id"): cv.use_id(sensor.Sensor),
         cv.Optional("indicator", default=True): cv.boolean,
         cv.Required("empty_voltage"): cv.All(cv.voltage, cv.Range(min=2.5, max=4.5)),
         cv.Required("full_voltage"): cv.All(cv.voltage, cv.Range(min=2.5, max=4.5)),
@@ -144,6 +146,7 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.Optional("zigbee_id"): cv.use_id(ZigbeeComponent),
     cv.Optional(CONF_TRANSPORT, default="ble"): cv.one_of("ble", "zigbee", "wifi", lower=True),
     cv.Optional("zigbee_power_diagnostics", default=False): cv.boolean,
+    cv.Optional("rendered_frames_sensor_id"): cv.use_id(sensor.Sensor),
     cv.Optional(CONF_TX_POWER, default=0): cv.one_of(0, 4, 8, int=True),
     cv.Optional(CONF_ADVERTISING_INTERVAL, default="1s"): advertising_interval,
     cv.Optional(CONF_BOOT_TEST_PATTERN, default="logo"): cv.enum(BOOT_PATTERNS, lower=True),
@@ -156,6 +159,10 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
 
 def validate_transport(config):
     full = fv.full_config.get()
+    if config[CONF_TRANSPORT] != "zigbee" and (
+        "rendered_frames_sensor_id" in config or "sensor_id" in config[CONF_BATTERY_VOLTAGE]
+    ):
+        raise cv.Invalid("Telemetry sensor IDs require transport: zigbee")
     if config[CONF_TRANSPORT] == "wifi":
         if not CORE.is_esp32 or "wifi" not in full or "api" not in full:
             raise cv.Invalid("transport: wifi requires ESP32, wifi and api")
@@ -277,5 +284,9 @@ async def to_code(config):
         if config[CONF_TRANSPORT] == "zigbee":
             cg.add_build_flag("-Wl,--wrap=zigbee_enable")
     if config[CONF_TRANSPORT] == "zigbee":
+        if "rendered_frames_sensor_id" in config:
+            cg.add(var.set_rendered_frames_sensor(await cg.get_variable(config["rendered_frames_sensor_id"])))
+        if "sensor_id" in config[CONF_BATTERY_VOLTAGE]:
+            cg.add(var.set_battery_sensor(await cg.get_variable(config[CONF_BATTERY_VOLTAGE]["sensor_id"])))
         from .zigbee_codegen import add_frame_endpoint
         CORE.add_job(add_frame_endpoint, var, config)

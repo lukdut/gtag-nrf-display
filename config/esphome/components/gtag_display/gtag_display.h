@@ -15,6 +15,9 @@
 #include "esphome/core/defines.h"
 #include "frame_protocol.h"
 #include "zigbee_protocol.h"
+#if defined(USE_GTAG_ZIGBEE) && defined(USE_SENSOR)
+#include "esphome/components/sensor/sensor.h"
+#endif
 #ifdef USE_GTAG_BATTERY
 #include "battery_bar.h"
 #include "battery_guard.h"
@@ -65,6 +68,10 @@ class GTagDisplay : public Component {
   uint32_t rendered_frames() const { return frames_; }
   // Called only from the ESPHome main loop, never directly by ZBOSS.
   void process_zigbee_packet(const uint8_t *data, size_t len, uint8_t reply[zigbee_frame::REPLY_SIZE]);
+#ifdef USE_SENSOR
+  void set_battery_sensor(sensor::Sensor *sensor) { battery_sensor_ = sensor; }
+  void set_rendered_frames_sensor(sensor::Sensor *sensor) { rendered_frames_sensor_ = sensor; }
+#endif
 #endif
 #ifdef USE_GTAG_BATTERY
   void set_battery_protection(uint16_t cutoff, uint16_t recovery) {
@@ -124,6 +131,11 @@ class GTagDisplay : public Component {
   int shown_battery_pixels_{-1};
 #endif
   std::atomic<uint16_t> battery_mv_{0xFFFF};
+#if defined(USE_GTAG_ZIGBEE) && defined(USE_SENSOR)
+  void publish_telemetry_();
+  sensor::Sensor *battery_sensor_{nullptr};
+  sensor::Sensor *rendered_frames_sensor_{nullptr};
+#endif
 
   frame::Receiver receiver_;
   struct k_mutex freshness_mutex_;

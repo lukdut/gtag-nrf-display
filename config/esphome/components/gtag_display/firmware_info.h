@@ -10,6 +10,8 @@ namespace esphome::gtag_display::firmware_info {
 // decide which packets a host may send.
 #ifdef USE_GTAG_WIFI
 inline constexpr char VERSION[] = "1.1.0";
+#elif defined(USE_GTAG_ZIGBEE)
+inline constexpr char VERSION[] = "1.1.1";
 #else
 inline constexpr char VERSION[] = "0.9.0";
 #endif

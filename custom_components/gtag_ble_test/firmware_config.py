@@ -10,10 +10,10 @@ import math
 import re
 from typing import Any
 
-# nRF52840 firmware is unchanged. Keep its wizard on the tested firmware tag;
-# the ESP32 profile has a separate release pin.
+# Pin each transport to its tested package revision.
 FIRMWARE_TAG = "v0.9.0"
-WIFI_FIRMWARE_TAG = "v1.1.0"
+ZIGBEE_FIRMWARE_TAG = "v1.1.1"
+WIFI_FIRMWARE_TAG = "v1.1.1"
 PACKAGE_ROOT = "github://lukdut/gtag-nrf-display/config/esphome/packages"
 LCD_PINS = ("dio_pin", "clk_pin", "cs_pin", "reset_pin")
 RESERVED_GPIO = {0, 1, 9, 10, 18}
@@ -173,15 +173,16 @@ def render_firmware_yaml(settings: dict) -> str:
             "  battery_voltage:", "    enabled: false", "",
             "# Add light:, sensor:, binary_sensor:, etc. here; these are standard ESPHome components.", "",
         ])
+    firmware_tag = ZIGBEE_FIRMWARE_TAG if settings["transport"] == "zigbee" else FIRMWARE_TAG
     lines = [
         "# GTag Display — generated for ESPHome Device Builder 2026.9.0.",
         "# Keep the display's original power and DisplayCLK/S1 clock connected.",
         "substitutions:", f"  gtag_name: {quote(settings['name'])}",
         f"  gtag_friendly_name: {quote(settings['friendly_name'])}", "", "packages:",
-        f"  gtag: {PACKAGE_ROOT}/{settings['transport']}.yaml@{FIRMWARE_TAG}",
+        f"  gtag: {PACKAGE_ROOT}/{settings['transport']}.yaml@{firmware_tag}",
     ]
     if settings["transport"] == "zigbee" and not settings["battery_enabled"]:
-        lines.append(f"  no_battery: {PACKAGE_ROOT}/zigbee-no-battery.yaml@{FIRMWARE_TAG}")
+        lines.append(f"  no_battery: {PACKAGE_ROOT}/zigbee-no-battery.yaml@{firmware_tag}")
     lines += ["", "nrf52:", "  board: adafruit_itsybitsy_nrf52840",
               f"  bootloader: {BOARDS[settings['board']]['bootloader']}", "  dcdc: false",
               "  framework:", "    version: 2.9.2", "", "gtag_display:"]

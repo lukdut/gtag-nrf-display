@@ -5,6 +5,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -57,6 +58,16 @@ inline void pin(unsigned port, unsigned bit, bool value) {
 }  // namespace sim
 
 namespace esphome {
+namespace sensor {
+class Sensor {
+ public:
+  bool has_state() const { return publications != 0; }
+  float get_raw_state() const { return value; }
+  void publish_state(float state) { value = state; ++publications; }
+  float value = NAN;
+  unsigned publications = 0;
+};
+}  // namespace sensor
 class Component {
  public:
   virtual ~Component() = default;

@@ -40,6 +40,8 @@ def main() -> None:
     wizard = (ROOT / "custom_components/gtag_ble_test/firmware_config.py").read_text()
     if f'WIFI_FIRMWARE_TAG = "{tag}"' not in wizard:
         raise SystemExit("The Wi-Fi wizard must use the release package tag")
+    if f'ZIGBEE_FIRMWARE_TAG = "{tag}"' not in wizard:
+        raise SystemExit("The Zigbee wizard must use the release package tag")
     public = ROOT / "config/esphome/gtag-super52840-zigbee.yaml"
     for package in ("zigbee", "super52840", "zigbee-no-battery"):
         if f"packages/{package}.yaml@{tag}" not in public.read_text():

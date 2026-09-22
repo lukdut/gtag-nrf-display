@@ -4,7 +4,7 @@ substitutions:
   gtag_friendly_name: GTag Display Wi-Fi
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/wifi.yaml@v1.1.0
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/wifi.yaml@v1.1.1
 
 wifi:
   ssid: !secret wifi_ssid

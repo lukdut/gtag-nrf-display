@@ -9,6 +9,7 @@ import ctypes
 import hashlib
 import importlib
 import logging
+import math
 from pathlib import Path
 import struct
 import subprocess
@@ -76,13 +77,14 @@ logging.getLogger(transport.__name__).setLevel(logging.CRITICAL)
 
 
 def setUpModule():
-    global build, fw, fw_without_battery, fw_zigbee
+    global build, fw, fw_without_battery, fw_zigbee, fw_zigbee_without_battery
     build = tempfile.TemporaryDirectory(prefix="gtag-tests-")
     path = Path(build.name)
     # Redirect platform includes to the host model, without editing the driver.
     headers = [
         "esphome/core/component.h", "esphome/core/application.h",
         "esphome/core/hal.h", "esphome/core/log.h", "esphome/core/defines.h",
+        "esphome/components/sensor/sensor.h",
         "zephyr/bluetooth/bluetooth.h", "zephyr/bluetooth/conn.h",
         "zephyr/bluetooth/gatt.h", "zephyr/bluetooth/uuid.h", "zephyr/device.h",
         "zephyr/devicetree.h", "zephyr/drivers/gpio.h",
@@ -95,7 +97,9 @@ def setUpModule():
         target.write_text('#include "native_stubs.h"\n')
     library = path / "driver.so"
     command = [
-        "g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fPIC", "-shared",
+        # Keep inline firmware metadata separate between the loaded BLE/Zigbee
+        # libraries: GNU unique symbols otherwise reuse the first variant.
+        "g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fPIC", "-shared", "-fno-gnu-unique",
         "-I", str(path), "-I", str(ROOT / "tests"), "-I", str(COMPONENT),
         str(ROOT / "tests/native_driver.cpp"),
     ]
@@ -103,11 +107,20 @@ def setUpModule():
     disabled_library = path / "driver_without_battery.so"
     subprocess.run([*command, "-o", str(disabled_library)], check=True)
     zigbee_library = path / "driver_zigbee.so"
-    subprocess.run([*command, "-DUSE_GTAG_ZIGBEE", "-DUSE_GTAG_BATTERY",
+    subprocess.run([*command, "-DUSE_GTAG_ZIGBEE", "-DUSE_GTAG_BATTERY", "-DUSE_SENSOR",
                     "-o", str(zigbee_library)], check=True)
+    zigbee_disabled_library = path / "driver_zigbee_without_battery.so"
+    subprocess.run([*command, "-DUSE_GTAG_ZIGBEE", "-DUSE_SENSOR",
+                    "-o", str(zigbee_disabled_library)], check=True)
     fw = ctypes.CDLL(str(library))
     fw_without_battery = ctypes.CDLL(str(disabled_library))
     fw_zigbee = ctypes.CDLL(str(zigbee_library))
+    fw_zigbee_without_battery = ctypes.CDLL(str(zigbee_disabled_library))
+    for variant in (fw_zigbee, fw_zigbee_without_battery):
+        variant.firmware_battery_published.restype = ctypes.c_float
+        variant.firmware_frames_published.restype = ctypes.c_float
+        variant.firmware_expects_followup.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p]
+        variant.firmware_expects_followup.restype = ctypes.c_bool
     fw_zigbee.firmware_packet.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p]
     fw.firmware_calibration.argtypes = [ctypes.c_float]
     for variant in (fw, fw_without_battery):
@@ -627,6 +640,98 @@ class ZigbeeDisplayTests(unittest.TestCase):
             self.assertEqual(self.packet(data)[2], 0)
         return self.packet(struct.pack('<BI', 3, session))
 
+    def test_telemetry_publishes_changes_without_idle_polling(self):
+        fw_zigbee.firmware_create_protected(3584, 0, 5)
+        self.assertEqual(fw_zigbee.firmware_battery_publications(), 0)
+        fw_zigbee.firmware_run(1000)
+        self.assertAlmostEqual(fw_zigbee.firmware_battery_published(), 4.2, places=3)
+        self.assertEqual(fw_zigbee.firmware_frames_published(), 0)
+        fw_zigbee.firmware_run(3000)
+        self.assertEqual(fw_zigbee.firmware_frames_published(), 1)
+        loops = fw_zigbee.firmware_loops()
+        fw_zigbee.firmware_run(600000)
+        self.assertEqual(fw_zigbee.firmware_adc_reads(), 3)
+        self.assertEqual(fw_zigbee.firmware_battery_publications(), 1)
+        self.assertEqual(fw_zigbee.firmware_frames_publications(), 2)
+        self.assertEqual(fw_zigbee.firmware_loops(), loops)
+        fw_zigbee.firmware_adc_value(3072, 0)
+        fw_zigbee.firmware_run(300000)
+        self.assertAlmostEqual(fw_zigbee.firmware_battery_published(), 3.6, places=3)
+        self.assertEqual(fw_zigbee.firmware_battery_publications(), 2)
+        before = fw_zigbee.firmware_frames()
+        self.assertEqual(fw_zigbee.firmware_frames_published(), before)
+        self.send_frame(b'\xff' * 4096)
+        self.assertEqual(fw_zigbee.firmware_frames_published(), before)
+        fw_zigbee.firmware_run(0)
+        self.assertEqual(fw_zigbee.firmware_frames_published(), before + 1)
+
+    def test_telemetry_respects_radio_gate_and_adc_error_transitions(self):
+        fw_zigbee.firmware_create_protected(2731, 0, 5)
+        fw_zigbee.firmware_run(604000)
+        self.assertEqual(fw_zigbee.firmware_battery_publications(), 0)
+        self.assertEqual(fw_zigbee.firmware_frames_publications(), 0)
+        fw_zigbee.firmware_adc_value(3584, 0)
+        fw_zigbee.firmware_run(300000)
+        self.assertEqual(fw_zigbee.firmware_battery_publications(), 1)
+        self.assertEqual(fw_zigbee.firmware_frames_published(), fw_zigbee.firmware_frames())
+        fw_zigbee.firmware_adc_value(0, -5)
+        fw_zigbee.firmware_run(600000)
+        self.assertTrue(math.isnan(fw_zigbee.firmware_battery_published()))
+        self.assertEqual(fw_zigbee.firmware_battery_publications(), 2)
+        fw_zigbee.firmware_adc_value(3584, 0)
+        fw_zigbee.firmware_run(300000)
+        self.assertEqual(fw_zigbee.firmware_battery_publications(), 3)
+        self.assertAlmostEqual(fw_zigbee.firmware_battery_published(), 4.2, places=3)
+
+    def test_counter_initializes_without_battery_or_boot_image(self):
+        variant = fw_zigbee_without_battery
+        variant.firmware_create(0, 1000)
+        variant.firmware_run(4000)
+        self.assertEqual(variant.firmware_frames_publications(), 1)
+        self.assertEqual(variant.firmware_frames_published(), 0)
+        variant.firmware_run(900000)
+        self.assertEqual(variant.firmware_frames_publications(), 1)
+        self.assertEqual(variant.firmware_battery_publications(), 0)
+        self.assertEqual(variant.firmware_adc_reads(), 0)
+        variant.firmware_pattern(0)
+        variant.firmware_run(0)
+        self.assertEqual(variant.firmware_frames_published(), 1)
+
+    def test_turbo_poll_only_when_frame_exchange_needs_another_request(self):
+        def check(packet, expected):
+            reply = self.packet(packet)
+            self.assertEqual(fw_zigbee.firmware_expects_followup(packet, len(packet), reply), expected,
+                             (packet.hex(), reply.hex()))
+
+        fw_zigbee.firmware_run(4000)
+        check(struct.pack('<BI', 4, 0), False)  # Idle status.
+        raw = b'\xff' * 4096
+        encoded = codec.encode_best(raw)
+        begin = struct.pack('<BBBHIII', 1, 1, encoded.codec, len(encoded.payload), 123,
+                            encoded.raw_crc32, 60000)
+        check(begin, True)
+        check(begin, True)  # Resumed session still needs DATA/COMMIT.
+        check(struct.pack('<BI', 4, 123), True)
+        check(struct.pack('<BI', 4, 999), False)
+        check(struct.pack('<BIH', 2, 999, 0) + encoded.payload[:32], False)
+        check(struct.pack('<BIH', 2, 123, 1) + encoded.payload[:1], False)
+        check(struct.pack('<BI', 4, 123), False)  # Recoverable receiver error.
+        check(begin, True)
+        for offset in range(0, len(encoded.payload), 32):
+            check(struct.pack('<BIH', 2, 123, offset) + encoded.payload[offset:offset + 32], True)
+        check(struct.pack('<BI', 3, 123), True)
+        check(struct.pack('<BI', 4, 123), True)  # LCD has not rendered yet.
+        check(struct.pack('<BBBHII', 1, 1, 0, 4096, 999, 0), False)  # BUSY.
+        fw_zigbee.firmware_run(0)
+        check(struct.pack('<BI', 4, 123), False)
+        check(struct.pack('<BI', 3, 123), False)  # Idempotent COMMIT.
+        check(struct.pack('<BIII', 6, 123, encoded.raw_crc32, 1), False)
+        check(struct.pack('<BIII', 6, 999, encoded.raw_crc32, 1), False)
+        for packet in (b'', b'\x01', b'\x02' + bytes(39), b'\x04\0', b'\x05' + bytes(4)):
+            check(packet, False)
+        self.send_frame(raw, session=456, bad_crc=True)
+        check(struct.pack('<BI', 4, 456), False)  # Receiver error.
+
     def test_battery_bar_preserves_zigbee_confirmation_and_diagnostics(self):
         fw_zigbee.firmware_battery_indicator(True)
         fw_zigbee.firmware_run(4000)
@@ -851,7 +956,7 @@ class FirmwareInfoTests(unittest.TestCase):
             variant.firmware_info_read(out)
             info = transport.FirmwareInfo.parse(out.raw)
             info.validate_transfer()
-            self.assertEqual(info.firmware_version, "0.9.0")
+            self.assertEqual(info.firmware_version, "1.1.1" if variant is fw_zigbee else "0.9.0")
             self.assertEqual(info.codecs, 3)
             self.assertEqual(info.features, 15 if battery else 1)
             self.assertEqual(info.max_chunk_size, chunk)
