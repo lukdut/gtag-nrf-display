@@ -4,7 +4,7 @@ Call rendering functions in an executor: font I/O and Pillow are synchronous.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -103,6 +103,7 @@ LAYOUT_SCHEMA = vol.Schema({
 class RenderedFrame:
     raw: bytes
     png: bytes
+    template_payload: bytes | None = field(default=None, compare=False)
 
 
 def _png(image: Image.Image) -> bytes:
@@ -225,7 +226,9 @@ def render_layout(layout: dict[str, Any], dynamic_data: dict | None = None) -> R
                                fill=color if item["filled"] else None)
         else:
             _icon(draw, item, color)
-    return RenderedFrame(image.tobytes().translate(BIT_REVERSE), _png(image))
+    raw = image.tobytes().translate(BIT_REVERSE)
+    from .template_codec import candidate_for_layout
+    return RenderedFrame(raw, _png(image), candidate_for_layout(layout, raw))
 
 
 def clock_layout(now: datetime) -> dict[str, Any]:

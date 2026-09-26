@@ -1,6 +1,7 @@
 """Trace the production ESP32 driver with GPIO/time/base64 boundaries replaced."""
 import base64
 import ctypes
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -121,6 +122,22 @@ class WifiDriverTests(unittest.TestCase):
         self.assertTrue(self.fw.wifi_confirm(b'00000001', self.crc, b'00000001'))
         self.fw.wifi_run(64)
         self.assertEqual(self.words()[-4096:], [0x1ff] * 4096)
+
+    def test_template_is_rendered_and_bad_revision_preserves_display(self):
+        golden = json.loads((ROOT / "tests/fixtures/three-values-v1.json").read_text())
+        raw, payload = bytes.fromhex(golden["raw"]), bytes.fromhex(golden["payload"])
+        crc = f"{zlib.crc32(raw):08x}".encode()
+        self.assertTrue(self.fw.wifi_submit(base64.b64encode(payload), 1, 2, b'00000001', crc, 0))
+        self.fw.wifi_run(100)
+        self.assertTrue(self.fw.wifi_rendered(b'00000001', crc))
+        self.assertEqual(bytes(word & 255 for word in self.words()[-4096:]), raw)
+        shown = self.words()
+        for bad, expected in ((b'\x01\x02' + payload[2:], b'decode_error'),
+                              (payload[:-1], b'decode_error')):
+            self.assertFalse(self.fw.wifi_submit(base64.b64encode(bad), 1, 2, b'00000002', crc, 0))
+            self.assertEqual(self.fw.wifi_error(), expected)
+            self.fw.wifi_run(100)
+            self.assertEqual(self.words(), shown)
 
 
 if __name__ == "__main__":

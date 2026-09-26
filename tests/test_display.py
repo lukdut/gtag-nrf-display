@@ -8,6 +8,7 @@ import asyncio
 import ctypes
 import hashlib
 import importlib
+import json
 import logging
 import math
 from pathlib import Path
@@ -956,8 +957,8 @@ class FirmwareInfoTests(unittest.TestCase):
             variant.firmware_info_read(out)
             info = transport.FirmwareInfo.parse(out.raw)
             info.validate_transfer()
-            self.assertEqual(info.firmware_version, "1.1.1" if variant is fw_zigbee else "0.9.0")
-            self.assertEqual(info.codecs, 3)
+            self.assertEqual(info.firmware_version, "1.2.0-dev.1")
+            self.assertEqual(info.codecs, 7)
             self.assertEqual(info.features, 15 if battery else 1)
             self.assertEqual(info.max_chunk_size, chunk)
             self.assertFalse(info.legacy)
@@ -967,6 +968,47 @@ class FirmwareInfoTests(unittest.TestCase):
 
 
 class NegotiationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_template_delivery_and_bitmap_fallback_on_older_firmware(self):
+        golden = json.loads((ROOT / "tests/fixtures/three-values-v1.json").read_text())
+        raw, payload = bytes.fromhex(golden["raw"]), bytes.fromhex(golden["payload"])
+        for mask, expected in ((7, 2), (3, 1), (1, 0)):
+            start()
+            class SelectedClient(Client):
+                async def read_gatt_char(self, uuid):
+                    value = await super().read_gatt_char(uuid)
+                    if uuid == transport.INFO_CHAR_UUID:
+                        value = value[:4] + mask.to_bytes(4, "little") + value[8:]
+                    return value
+            client = SelectedClient()
+            prepared = transport.PreparedFrame.prepare(raw, payload)
+            report = await transport.FrameSender(client.connect, "test").send_prepared(prepared)
+            self.assertEqual(report.codec, expected)
+            if expected == 2:
+                self.assertEqual(report.encoded_size, 78)
+            self.assertEqual(bytes(word & 255 for word in words()[-4096:]), raw)
+            self.assertEqual(fw.firmware_frames(), 1)
+
+    async def test_template_reconnect_renegotiates_after_firmware_downgrade(self):
+        golden = json.loads((ROOT / "tests/fixtures/three-values-v1.json").read_text())
+        raw, payload = bytes.fromhex(golden["raw"]), bytes.fromhex(golden["payload"])
+        start()
+        class DowngradedClient(Client):
+            reads = 0
+            async def read_gatt_char(self, uuid):
+                value = await super().read_gatt_char(uuid)
+                if uuid == transport.INFO_CHAR_UUID:
+                    self.reads += 1
+                    value = value[:4] + (7 if self.reads == 1 else 3).to_bytes(4, "little") + value[8:]
+                return value
+        client = DowngradedClient(fault="disconnect")
+        with patch.object(transport, "RECONNECT_DELAYS", [0]):
+            report = await transport.FrameSender(client.connect, "test").send_prepared(
+                transport.PreparedFrame.prepare(raw, payload))
+        self.assertEqual(report.codec, 1)
+        self.assertEqual(report.sessions, 2)
+        self.assertEqual(bytes(word & 255 for word in words()[-4096:]), raw)
+        self.assertEqual(fw.firmware_frames(), 1)
+
     async def test_raw_only_unknown_codec_bits_and_legacy(self):
         for legacy in (False, True):
             start()

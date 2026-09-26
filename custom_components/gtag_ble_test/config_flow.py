@@ -23,8 +23,8 @@ from .firmware_flow import FirmwareWizardMixin
 from .diagnostic_flow import DiagnosticFlowMixin
 from .layout_flow import LayoutTransferMixin, excluded_entities
 from .layouts import (
-    DECIMAL_PLACES, DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, StaleAfterTooShort,
-    async_render_layout, normalize_saved_timing, preset_layout,
+    DECIMAL_PLACES, DEFAULT_INTERVAL, DEFAULT_PRESET, PRESETS, VALUE_SOURCES, StaleAfterTooShort,
+    async_render_layout, is_text_value, normalize_saved_timing, preset_layout,
     validate_settings, validate_timing, value_count,
 )
 from .render import clock_layout, preview_svg
@@ -248,6 +248,8 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
             except vol.Invalid:
                 errors["base"] = "invalid_settings"
             else:
+                if self._settings["preset"] == "three_values":
+                    return await self.async_step_value_sources()
                 if value_count(self._settings["preset"]):
                     return await self.async_step_values()
                 return await self.async_step_preview()
@@ -256,6 +258,25 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
             errors=errors, description_placeholders=placeholders, last_step=False,
         )
 
+    async def async_step_value_sources(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        schema = vol.Schema({
+            vol.Required(f"source_{index}", default=self._settings.get(f"source_{index}", "entity")):
+                selector.SelectSelector(selector.SelectSelectorConfig(
+                    options=list(VALUE_SOURCES), translation_key="value_source",
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                ))
+            for index in (3, 1, 2)
+        })
+        if user_input is not None:
+            self._settings.update(schema(user_input))
+            return await self.async_step_three_values()
+        return self.async_show_form(
+            step_id="value_sources", data_schema=schema, last_step=False,
+        )
+
+    async def async_step_three_values(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self.async_step_values(user_input)
+
     async def async_step_values(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         registry = er.async_get(self.hass)
         excluded = excluded_entities(self.hass)
@@ -263,8 +284,14 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
         count = value_count(self._settings["preset"])
         weather = self._settings["preset"] == "weather"
         graph = self._settings["preset"] == "value_graph"
+        three_values = self._settings["preset"] == "three_values"
         domains = ["weather"] if weather else ["sensor", "input_number", "number"] if graph else None
-        for index in range(1, count + 1):
+        for index in ((3, 1, 2) if three_values else range(1, count + 1)):
+            if is_text_value(self._settings, index):
+                if index != 3:
+                    fields[vol.Optional(f"label_{index}")] = selector.TextSelector()
+                fields[vol.Required(f"text_{index}")] = selector.TextSelector()
+                continue
             fields[vol.Required(f"entity_{index}")] = selector.EntitySelector(
                 selector.EntitySelectorConfig(exclude_entities=excluded, **({"filter": {"domain": domains}} if domains else {})),
             )
@@ -285,6 +312,13 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
         if user_input is not None:
             candidate = dict(self._settings)
             for index in range(1, count + 1):
+                if is_text_value(candidate, index):
+                    candidate[f"text_{index}"] = user_input.get(f"text_{index}", "")
+                    candidate[f"label_{index}"] = user_input.get(f"label_{index}", "")
+                    for field in ("entity", "unit", "decimals"):
+                        candidate.pop(f"{field}_{index}", None)
+                    continue
+                candidate.pop(f"text_{index}", None)
                 for field in ("entity", "label", "unit"):
                     candidate[f"{field}_{index}"] = user_input.get(f"{field}_{index}", "")
                 candidate[f"decimals_{index}"] = user_input.get(f"decimals_{index}", "original")
@@ -308,7 +342,8 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
             try:
                 candidate = validate_settings(candidate)
             except vol.Invalid as err:
-                errors[str(err.path[0]) if err.path else "base"] = "invalid_settings"
+                field = str(err.path[0]) if err.path else "base"
+                errors[field] = "invalid_text" if field.startswith("text_") else "invalid_settings"
             if not errors:
                 self._settings = candidate
                 return await self.async_step_preview()
@@ -316,7 +351,8 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
         else:
             suggestions = self._settings
         return self.async_show_form(
-            step_id="values", data_schema=self.add_suggested_values_to_schema(schema, suggestions),
+            step_id="three_values" if three_values else "values",
+            data_schema=self.add_suggested_values_to_schema(schema, suggestions),
             errors=errors, last_step=False,
         )
 

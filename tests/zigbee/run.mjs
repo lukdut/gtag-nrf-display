@@ -2,7 +2,7 @@
 // and the production C++ receiver/LCD driver. Only radio delivery is simulated.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {copyFile, mkdtemp, rm} from 'node:fs/promises';
+import {copyFile, mkdtemp, rm, readFile} from 'node:fs/promises';
 import {createInterface} from 'node:readline';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {Controller, Zcl} from 'zigbee-herdsman';
@@ -69,13 +69,42 @@ const verify = async (raw, frames = 1) => {
 };
 try {
     assert.equal((await lines.next()).value, 'ready');
+    await test('template renders on the device and falls back for old firmware', async () => {
+        const golden = JSON.parse(await readFile(`${root}/tests/fixtures/three-values-v1.json`, 'utf8'));
+        const raw = Buffer.from(golden.raw, 'hex'), template = Buffer.from(golden.payload, 'hex');
+        for (const [mask, codec] of [[7, 2], [3, 1], [1, 0]]) {
+            await request('reset');
+            const ep = endpoint(async (phase, packet, ack) => {
+                if (phase === 'after' && packet[0] === 7) ack.writeUInt32LE(mask, 7);
+            });
+            const result = await transferFrame(ep, raw, {sleep: noSleep, template});
+            assert.equal(result.codec, codec);
+            if (codec === 2) assert.equal(result.bytes, 78);
+            await verify(raw);
+        }
+        assert.equal(encodeFrame(raw, 7, 4096, Buffer.from([1, 2])).codec, 1);
+        const wrong = Buffer.from(template); wrong[1] = 2;
+        assert.equal(encodeFrame(raw, 7, 4096, wrong).codec, 1);
+    });
+    await test('template survives lost COMMIT response without duplicate rendering', async () => {
+        const golden = JSON.parse(await readFile(`${root}/tests/fixtures/three-values-v1.json`, 'utf8'));
+        const raw = Buffer.from(golden.raw, 'hex'), template = Buffer.from(golden.payload, 'hex');
+        let lost = false;
+        const ep = endpoint(async (phase, packet) => {
+            if (phase === 'after' && packet[0] === 3 && !lost) { lost = true; throw new Error('lost reply'); }
+        });
+        const result = await transferFrame(ep, raw, {sleep: noSleep, template});
+        assert.equal(result.codec, 2);
+        assert.ok(lost);
+        await verify(raw);
+    });
     await test('capabilities expose firmware version and select RAW independently per device', async () => {
         const rawOnly = endpoint(async (phase, packet, ack) => {
             if (phase === 'after' && packet[0] === 7) ack.writeUInt32LE(0x80000001, 7);
         });
         const raw = Buffer.alloc(4096, 255);
         const first = await transferFrame(rawOnly, raw, {sleep: noSleep});
-        assert.equal(first.info.firmware_version, '1.1.1');
+        assert.equal(first.info.firmware_version, '1.2.0-dev.1');
         assert.equal(first.info.features, 15);
         assert.equal(first.codec, 0);
         assert.equal(first.bytes, 4096);
@@ -506,7 +535,7 @@ try {
         const last = states.at(-1);
         assert.equal(last.connection_status, 'ok');
         assert.equal(last.connection_request_id, 'check-1');
-        assert.equal(last.firmware_version, '1.1.1');
+        assert.equal(last.firmware_version, '1.2.0-dev.1');
         assert.ok(last.connection_checked_at);
         assert.deepEqual(await request('inspect'), before);
         await converter.connectionConverter.convertSet(null, 'check_connection', 'check', meta);

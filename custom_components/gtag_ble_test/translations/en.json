@@ -215,7 +215,8 @@
         },
         "data_description": {
           "update_interval": "Minimum pause between transfers, in seconds. Values update when their entities change; the clock updates once a minute. A longer pause reduces update frequency.",
-          "stale_after": "Minutes without confirmation from HA; at least twice the update interval, rounded up to whole minutes. 0 disables the check. The icon inverts pixels in the upper-right corner. Requires updated firmware and Zigbee converter."
+          "stale_after": "Minutes without confirmation from HA; at least twice the update interval, rounded up to whole minutes. 0 disables the check. The icon inverts pixels in the upper-right corner. Requires updated firmware and Zigbee converter.",
+          "preset": "🌿 — less data over the radio: supported firmware renders this layout on the device. Older firmware or unsupported text still uses normal image transfer."
         }
       },
       "init": {
@@ -280,6 +281,50 @@
           "action": "Action",
           "duration": "Check duration, s"
         }
+      },
+      "value_sources": {
+        "title": "Sources for the three fields",
+        "description": "Choose an HA entity or plain text for each field, then enter its content on the next step. The header is centered above the two lower fields.",
+        "data": {
+          "source_3": "Centered header",
+          "source_1": "Bottom left",
+          "source_2": "Bottom right"
+        }
+      },
+      "three_values": {
+        "title": "Three values or text",
+        "description": "The header is centered, with two fields below it. Empty entity labels and units use the values from HA. Labels are optional for plain text. Preview the result on the next step.",
+        "data": {
+          "entity_3": "Centered header — entity",
+          "label_3": "Centered header — label",
+          "unit_3": "Centered header — unit",
+          "decimals_3": "Centered header — decimal places",
+          "text_3": "Centered header — text",
+          "entity_1": "Bottom left — entity",
+          "label_1": "Bottom left — label",
+          "unit_1": "Bottom left — unit",
+          "decimals_1": "Bottom left — decimal places",
+          "text_1": "Bottom left — text",
+          "entity_2": "Bottom right — entity",
+          "label_2": "Bottom right — label",
+          "unit_2": "Bottom right — unit",
+          "decimals_2": "Bottom right — decimal places",
+          "text_2": "Bottom right — text"
+        },
+        "data_description": {
+          "label_3": "Optional. Up to 80 characters; text fits the available space.",
+          "unit_3": "Optional. Up to 16 characters. Enter - to hide the unit.",
+          "decimals_3": "Rounds numeric values on this screen only. For example, 1: 23.456 → 23.5; 0: 23.456 → 23. No rounding keeps the original value.",
+          "text_3": "One non-empty line, up to 128 characters. Shown literally; long text shrinks or is shortened to fit.",
+          "label_1": "Optional. Up to 80 characters; text fits the available space.",
+          "unit_1": "Optional. Up to 16 characters. Enter - to hide the unit.",
+          "decimals_1": "Rounds numeric values on this screen only. For example, 1: 23.456 → 23.5; 0: 23.456 → 23. No rounding keeps the original value.",
+          "text_1": "One non-empty line, up to 128 characters. Shown literally; long text shrinks or is shortened to fit.",
+          "label_2": "Optional. Up to 80 characters; text fits the available space.",
+          "unit_2": "Optional. Up to 16 characters. Enter - to hide the unit.",
+          "decimals_2": "Rounds numeric values on this screen only. For example, 1: 23.456 → 23.5; 0: 23.456 → 23. No rounding keeps the original value.",
+          "text_2": "One non-empty line, up to 128 characters. Shown literally; long text shrinks or is shortened to fit."
+        }
       }
     },
     "error": {
@@ -295,7 +340,8 @@
       "no_layout_to_export": "No saved layout. Configure the display or send a layout with Draw first. Raw test images have no exportable layout.",
       "layout_download_unavailable": "Unable to create a download link. Copy the JSON below or try again.",
       "hourly_forecast_required": "Choose a weather entity supporting hourly forecasts.",
-      "numeric_entity_required": "Choose an entity with a numeric value."
+      "numeric_entity_required": "Choose an entity with a numeric value.",
+      "invalid_text": "Enter one non-empty line of up to 128 characters."
     },
     "abort": {
       "layout_exported": "{download_link_start}Download {filename}{download_link_end}\n\nThe link is valid for 20 minutes, until HA restarts. Display settings have not changed.",
@@ -314,7 +360,8 @@
         "clock_two_values": "Clock and two values",
         "custom": "Custom layout",
         "weather": "Weather and hourly forecast",
-        "value_graph": "Value and history graph"
+        "value_graph": "Value and history graph",
+        "three_values": "🌿 Three values or text"
       }
     },
     "preview_action": {
@@ -391,7 +438,8 @@
         "invalid_response": "The device returned an invalid response. Check firmware and converter versions.",
         "bluetooth_unavailable": "No connectable Bluetooth advertisement found. Check power, range and the HA Bluetooth adapter/proxy.",
         "communication_error": "Communication failed. Check the details below, power and the selected transport.",
-        "transfer_error": "Image transfer failed"
+        "transfer_error": "Image transfer failed",
+        "three_values_v1": "Three fields rendered on device"
       }
     },
     "diagnostic_action": {
@@ -399,6 +447,12 @@
         "check": "Check connection",
         "refresh": "Refresh information",
         "back": "Back to menu"
+      }
+    },
+    "value_source": {
+      "options": {
+        "entity": "Home Assistant entity",
+        "text": "Plain text"
       }
     }
   },

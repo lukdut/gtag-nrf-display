@@ -7,6 +7,7 @@ __pycache__/
 venv/
 secrets.yaml
 /dist/
+/.local-artifacts/
 /.nrf-sdk/
 node_modules/
 tests/zigbee/.runtime-*/

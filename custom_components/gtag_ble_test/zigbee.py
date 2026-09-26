@@ -326,7 +326,7 @@ class ZigbeeTransport:
             if not ready.done():
                 ready.cancel()
 
-    async def async_send(self, raw: bytes, freshness_timeout: int = 0) -> dict:
+    async def async_send(self, raw: bytes, freshness_timeout: int = 0, template_payload: bytes | None = None) -> dict:
         if len(raw) != 4096:
             raise ValueError("Expected 4096 framebuffer bytes")
         async with self._lock:
@@ -342,7 +342,9 @@ class ZigbeeTransport:
                     await self._wait_reply_subscription(pending)
                     await mqtt.async_publish(self.hass, f"{self.base_topic}/{self.address}/set", json.dumps({
                         "frame": {"data": base64.b64encode(raw).decode("ascii"), "request_id": request_id,
-                                  "freshness_timeout": freshness_timeout},
+                                  "freshness_timeout": freshness_timeout,
+                                  **({"template": base64.b64encode(template_payload).decode("ascii")}
+                                     if template_payload is not None else {})},
                     }), qos=0, retain=False)
                     result = await pending
                 if str(result.get("frame_crc32", "")).lower() != crc:

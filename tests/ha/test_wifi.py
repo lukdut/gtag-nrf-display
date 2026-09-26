@@ -1,6 +1,8 @@
 """Exercise the real HA service registry, config flow and display queue."""
 import asyncio
 import base64
+import json
+from pathlib import Path
 import struct
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -13,6 +15,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.gtag_ble_test.const import DOMAIN
 from custom_components.gtag_ble_test.display import Display
 from custom_components.gtag_ble_test.frame_codec import white_rle_v1_decode
+from custom_components.gtag_ble_test.template_codec import render_payload
 from custom_components.gtag_ble_test.wifi import WifiTransport
 
 
@@ -23,18 +26,19 @@ def device(hass):
                                  data={"device_name": name})
         linked.add_to_hass(hass)
         calls = []
-        state = {"frame": None, "crc": None, "codecs": 3}
+        state = {"frame": None, "crc": None, "codecs": 3, "limit": 4096}
 
         async def info(call):
             calls.append(call)
-            packet = struct.pack('<BBBBIIHHHH', 1, 1, 1, 1, state["codecs"], 1, 256, 128, 4096, 4096)
+            packet = struct.pack('<BBBBIIHHHH', 1, 1, 1, 1, state["codecs"], 1, 256, 128, 4096, state["limit"])
             return {"wifi_protocol": 1, "info": (packet + b"1.1.0-beta.2".ljust(20, b'\0')).hex()}
 
         async def frame(call):
             calls.append(call)
             data = call.data
             payload = base64.b64decode(data["payload"], validate=True)
-            state["raw"] = payload if data["codec"] == 0 else white_rle_v1_decode(payload)
+            state["raw"] = (payload if data["codec"] == 0 else render_payload(payload)
+                            if data["codec"] == 2 else white_rle_v1_decode(payload))
             state["frame"], state["crc"] = data["frame_id"], data["crc32"]
             return {"rendered": True, "frame_id": state["frame"], "crc32": state["crc"]}
 
@@ -73,6 +77,30 @@ async def test_raw_only_firmware(hass, device):
     assert report["codec"] == 0 and report["encoded_size"] == 4096
 
 
+async def test_template_display_negotiates_again_after_firmware_rollback(hass, device, monkeypatch):
+    from custom_components.gtag_ble_test import display as module
+    monkeypatch.setattr(module, "MIN_UPDATE_INTERVAL", 0)
+    monkeypatch.setattr(module, "COALESCE_SECONDS", 0)
+    dev = device()
+    dev.entry.add_to_hass(hass)
+    display = Display(hass, dev.entry)
+    root = Path(__file__).resolve().parents[2]
+    layout = json.loads((root / "docs/design/three-values-layout.json").read_text())
+    expected = bytes.fromhex(json.loads((root / "tests/fixtures/three-values-v1.json").read_text())["raw"])
+    try:
+        await display.async_load()
+        for mask, codec in ((7, 2), (3, 1), (1, 0)):
+            dev.state["codecs"] = mask
+            await display.async_draw(layout, auto_update=False, force=True)
+            assert display.report["codec"] == codec
+            assert dev.state["raw"] == expected
+            if codec == 2:
+                assert display.report["encoded_size"] == 78
+                assert "three_values_v1" in display.report["firmware_codecs"]
+    finally:
+        await display.async_close()
+
+
 @pytest.mark.parametrize("response", [None, {}, {"rendered": False},
                                       {"rendered": True, "frame_id": "wrong", "crc32": "wrong"}])
 async def test_no_success_without_matching_ack(hass, device, response):
@@ -82,6 +110,20 @@ async def test_no_success_without_matching_ack(hass, device, response):
     hass.services.async_register("esphome", "gtag_kitchen_gtag_frame", bad, supports_response=SupportsResponse.ONLY)
     with pytest.raises(HomeAssistantError):
         await dev.transport.async_send(b'\xff' * 4096, 300)
+
+
+async def test_template_respects_single_call_limit_before_sending(hass, device):
+    dev = device()
+    fixture = json.loads((Path(__file__).resolve().parents[1] / "fixtures/three-values-v1.json").read_text())
+    raw, payload = bytes.fromhex(fixture["raw"]), bytes.fromhex(fixture["payload"])
+    dev.state.update(codecs=7, limit=len(payload))
+    report = await dev.transport.async_send(raw, 300, payload)
+    assert report["codec"] == 2 and dev.state["raw"] == raw
+    dev.calls.clear()
+    dev.state["limit"] -= 1
+    with pytest.raises(HomeAssistantError, match="Cannot encode frame"):
+        await dev.transport.async_send(raw, 300, payload)
+    assert [call.service for call in dev.calls] == ["gtag_kitchen_gtag_info"]
 
 
 async def test_two_devices_are_independent(hass, device):

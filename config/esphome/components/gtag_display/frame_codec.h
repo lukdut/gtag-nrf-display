@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "template_render.h"
 
 namespace esphome {
 namespace gtag_display {
@@ -14,6 +15,7 @@ static constexpr size_t MAX_ENCODED_SIZE = RAW_FRAME_SIZE;
 enum class Codec : uint8_t {
   RAW = 0x00,
   WHITE_RLE_V1 = 0x01,
+  THREE_VALUES_V1 = 0x02,
 };
 
 enum class DecodeError : uint8_t {
@@ -33,7 +35,7 @@ struct DecodeResult {
 };
 
 inline bool codec_supported(Codec codec) {
-  return codec == Codec::RAW || codec == Codec::WHITE_RLE_V1;
+  return codec == Codec::RAW || codec == Codec::WHITE_RLE_V1 || codec == Codec::THREE_VALUES_V1;
 }
 
 inline DecodeResult decode_frame(
@@ -54,6 +56,11 @@ inline DecodeResult decode_frame(
 
     std::memcpy(raw, encoded, RAW_FRAME_SIZE);
     return {true, DecodeError::NONE, RAW_FRAME_SIZE, RAW_FRAME_SIZE};
+  }
+
+  if (codec == Codec::THREE_VALUES_V1) {
+    const bool ok = template_render::render(encoded, encoded_size, raw, raw_size);
+    return {ok, ok ? DecodeError::NONE : DecodeError::INPUT_SIZE, ok ? encoded_size : 0, ok ? raw_size : 0};
   }
 
   if (codec != Codec::WHITE_RLE_V1) {

@@ -72,7 +72,7 @@ class FirmwareInfo:
 
     def attributes(self) -> dict:
         return {"firmware_version": self.firmware_version,
-                "firmware_codecs": [name for bit, name in enumerate(("raw", "white_rle_v1")) if self.codecs & (1 << bit)],
+                "firmware_codecs": [name for bit, name in enumerate(("raw", "white_rle_v1", "three_values_v1")) if self.codecs & (1 << bit)],
                 "firmware_features": [name for bit, name in enumerate(("freshness", "battery_voltage", "battery_bar", "battery_protection")) if self.features & (1 << bit)],
                 "firmware_capabilities": asdict(self),
                 "firmware_legacy": self.legacy,

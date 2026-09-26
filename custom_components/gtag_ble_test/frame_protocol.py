@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import secrets
 
-from .frame_codec import EncodedFrame, encode_best
+from .frame_codec import EncodedFrame, encode_best, white_rle_v1_decode
 
 PROTOCOL_VERSION = 1
 
@@ -62,16 +62,22 @@ class PreparedFrame:
     payload: bytes
     raw_size: int
     codec_name: str
+    template_payload: bytes | None = None
 
     @classmethod
-    def prepare(cls, raw: bytes) -> "PreparedFrame":
+    def prepare(cls, raw: bytes, template_payload: bytes | None = None) -> "PreparedFrame":
         encoded = encode_best(raw)
         return cls(
             descriptor=FrameDescriptor.from_encoded(encoded),
             payload=encoded.payload,
             raw_size=encoded.raw_size,
             codec_name=encoded.codec_name,
+            template_payload=template_payload,
         )
+
+    def select(self, supported_codecs: int, max_encoded_size: int) -> EncodedFrame:
+        raw = self.payload if self.descriptor.codec == 0 else white_rle_v1_decode(self.payload)
+        return encode_best(raw, supported_codecs, max_encoded_size, self.template_payload)
 
     @property
     def bytes_saved(self) -> int:

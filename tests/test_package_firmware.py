@@ -40,6 +40,13 @@ class FirmwarePackagingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.validate([0], 0)
 
+    def test_stock_uf2_bootloader_limit_even_when_linker_partition_is_larger(self):
+        for start in (0x26000, 0x27000):
+            self.validate([start, 0xACF00], start)
+            for address in (0xACF80, 0xAD000, 0xCD400):
+                with self.subTest(start=start, address=address), self.assertRaises(ValueError):
+                    self.validate([start, address], start)
+
 
 if __name__ == "__main__":
     unittest.main()

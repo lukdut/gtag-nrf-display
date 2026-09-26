@@ -7,6 +7,9 @@ import struct
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
+# Stock nice!nano UF2 bootloader 0.6.0 reserves flash above this address.
+# The linker's larger Zephyr partition does NOT imply UF2 can write it.
+UF2_APP_END = 0xAD000
 
 
 def validate_uf2(path: Path, *, app_start: int = 0x26000) -> None:
@@ -23,7 +26,7 @@ def validate_uf2(path: Path, *, app_start: int = 0x26000) -> None:
                 or struct.unpack_from("<I", block, 508)[0] != 0x0AB16F30
                 or flags != 0x2000 or family != 0xADA52840
                 or size != 256 or number != offset // 512 or total != len(raw) // 512
-                or not app_start <= address < address + size <= 0xE9000):
+                or not app_start <= address < address + size <= UF2_APP_END):
             raise ValueError(f"Invalid or non-application UF2 block {offset // 512}")
         addresses.append(address)
     if min(addresses) != app_start or len(addresses) != len(set(addresses)):
@@ -35,13 +38,14 @@ def main() -> None:
     parser.add_argument("--profile", required=True, choices=("ble", "zigbee"))
     parser.add_argument("--uf2", type=Path, required=True)
     parser.add_argument("--board", choices=("promicro", "super52840"), default="promicro")
+    parser.add_argument("--dist", type=Path, help="Override the output directory")
     args = parser.parse_args()
     if args.board == "super52840" and args.profile != "zigbee":
         parser.error("The packaged Super52840 configuration uses Zigbee")
     validate_uf2(args.uf2, app_start=0x27000 if args.board == "super52840" else 0x26000)
     config = ROOT / "config/esphome"
-    dist = ROOT / "dist"
-    dist.mkdir(exist_ok=True)
+    dist = args.dist if args.dist is not None else ROOT / "dist"
+    dist.mkdir(parents=True, exist_ok=True)
     name = "gtag-display" if args.profile == "ble" else "gtag-zigbee"
     local_name = "nrf-gtag-display.yaml" if args.profile == "ble" else "nrf-gtag-zigbee.yaml"
     public_name = f"gtag-{args.profile}.yaml"

@@ -8,13 +8,7 @@ namespace esphome::gtag_display::firmware_info {
 // Firmware version is independent of the HA integration and ESPHome versions.
 // Bump for every published firmware; capabilities, not version comparisons,
 // decide which packets a host may send.
-#ifdef USE_GTAG_WIFI
-inline constexpr char VERSION[] = "1.1.0";
-#elif defined(USE_GTAG_ZIGBEE)
-inline constexpr char VERSION[] = "1.1.1";
-#else
-inline constexpr char VERSION[] = "0.9.0";
-#endif
+inline constexpr char VERSION[] = "1.2.0-dev.1";
 constexpr uint8_t SCHEMA = 1;
 constexpr uint8_t ZIGBEE_OPCODE = 7;
 constexpr size_t SIZE = 40;

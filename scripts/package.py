@@ -14,7 +14,7 @@ def main() -> None:
                      "layout_transfer.py", "layout_flow.py", "layout_download.py",
                      "connection.py", "diagnostic_flow.py",
                      "widget_data.py", "widget_render.py",
-                     "fonts/DejaVuSans.ttf", "fonts/LICENSE.txt",
+                     "fonts/DejaVuSans.ttf", "fonts/template_v1.bin", "fonts/LICENSE.txt",
                      "translations/en.json", "translations/ru.json", "brand/icon.png"):
         if not (component / required).is_file():
             raise SystemExit(f"Missing required package file: {required}")
@@ -24,7 +24,7 @@ def main() -> None:
     temporary = archive.with_suffix(".zip.tmp")
     files = sorted(path for path in component.rglob("*")
                    if path.is_file() and "__pycache__" not in path.parts
-                   and path.suffix in {".py", ".json", ".yaml", ".ttf", ".txt", ".png"})
+                   and path.suffix in {".py", ".json", ".yaml", ".ttf", ".txt", ".png", ".bin"})
     with ZipFile(temporary, "w", ZIP_DEFLATED, compresslevel=9) as output:
         for path in files:
             output.write(path, path.relative_to(root).as_posix())

@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import zlib
@@ -127,6 +128,20 @@ async def test_only_matching_live_lcd_ack_confirms_frame(transport, broker):
     report = await task
     assert report["receiver_status"] == "displayed" and report["transport"] == "zigbee"
     assert transport._pending is None
+
+
+async def test_optional_template_keeps_bitmap_for_old_converters(transport, broker):
+    golden = json.loads((Path(__file__).resolve().parents[2] / "tests/fixtures/three-values-v1.json").read_text())
+    raw, payload = bytes.fromhex(golden["raw"]), bytes.fromhex(golden["payload"])
+    task = asyncio.create_task(transport.async_send(raw, 300, payload))
+    await asyncio.sleep(0)
+    _, message = broker.messages[-1]
+    assert base64.b64decode(message["frame"]["template"]) == payload
+    assert base64.b64decode(message["frame"]["data"]) == raw
+    # A previous converter ignores the optional field and confirms a bitmap.
+    broker.confirm(message, frame_codec=1)
+    report = await task
+    assert report["codec"] == 1 and report["freshness_timeout"] == 300
 
 
 @pytest.mark.parametrize("command", ["frame", "freshness", "check"])

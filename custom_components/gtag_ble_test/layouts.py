@@ -13,10 +13,11 @@ from homeassistant.helpers.template import Template
 
 from .render import DYNAMIC_TYPES, LAYOUT_SCHEMA, RenderedFrame, render_layout
 
-PRESETS = ("clock", "single_value", "clock_two_values", "weather", "value_graph")
+PRESETS = ("clock", "single_value", "clock_two_values", "three_values", "weather", "value_graph")
 DEFAULT_PRESET = "clock_two_values"
 DEFAULT_INTERVAL = 5
 DECIMAL_PLACES = ("original", "0", "1", "2", "3", "4", "5", "6")
+VALUE_SOURCES = ("entity", "text")
 
 SETTINGS_SCHEMA = vol.Schema({
     vol.Required("preset"): vol.In((*PRESETS, "custom")),
@@ -25,10 +26,12 @@ SETTINGS_SCHEMA = vol.Schema({
     vol.Optional("update_interval", default=DEFAULT_INTERVAL): vol.All(vol.Coerce(int), vol.Range(min=5, max=3600)),
     vol.Optional("stale_after", default=15): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
     vol.Optional("history_hours", default=24): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
-    **{vol.Optional(f"entity_{index}"): cv.entity_id for index in (1, 2)},
-    **{vol.Optional(f"label_{index}", default=""): vol.All(str, vol.Length(max=80)) for index in (1, 2)},
-    **{vol.Optional(f"unit_{index}", default=""): vol.All(str, vol.Length(max=16)) for index in (1, 2)},
-    **{vol.Optional(f"decimals_{index}", default="original"): vol.In(DECIMAL_PLACES) for index in (1, 2)},
+    **{vol.Optional(f"entity_{index}"): cv.entity_id for index in (1, 2, 3)},
+    **{vol.Optional(f"label_{index}", default=""): vol.All(str, vol.Length(max=80)) for index in (1, 2, 3)},
+    **{vol.Optional(f"unit_{index}", default=""): vol.All(str, vol.Length(max=16)) for index in (1, 2, 3)},
+    **{vol.Optional(f"decimals_{index}", default="original"): vol.In(DECIMAL_PLACES) for index in (1, 2, 3)},
+    **{vol.Optional(f"source_{index}"): vol.In(VALUE_SOURCES) for index in (1, 2, 3)},
+    **{vol.Optional(f"text_{index}"): vol.All(str, vol.Length(max=128)) for index in (1, 2, 3)},
 })
 
 
@@ -69,6 +72,14 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         settings.pop("layout", None)
         settings.pop("auto_update", None)
     for index in range(1, value_count(settings["preset"]) + 1):
+        if settings["preset"] == "three_values":
+            settings.setdefault(f"source_{index}", "entity")
+        if is_text_value(settings, index):
+            value = settings.get(f"text_{index}", "")
+            if not value.strip() or "\n" in value or "\r" in value:
+                raise vol.Invalid("A non-empty single line of text is required", [f"text_{index}"])
+            settings.pop(f"entity_{index}", None)
+            continue
         if not settings.get(f"entity_{index}"):
             raise vol.Invalid(f"entity_{index} is required for this preset", [f"entity_{index}"])
     domains = ["weather"] if settings["preset"] == "weather" else ["sensor", "input_number", "number"] if settings["preset"] == "value_graph" else None
@@ -78,7 +89,13 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def value_count(preset: str) -> int:
+    if preset == "three_values":
+        return 3
     return 2 if preset == "clock_two_values" else 1 if preset in ("single_value", "weather", "value_graph") else 0
+
+
+def is_text_value(settings: dict, index: int) -> bool:
+    return settings["preset"] == "three_values" and settings.get(f"source_{index}") == "text"
 
 
 def _quoted(value: str) -> str:
@@ -86,14 +103,17 @@ def _quoted(value: str) -> str:
 
 
 def _label(settings: dict, index: int) -> str:
-    entity = _quoted(settings[f"entity_{index}"])
     label = settings.get(f"label_{index}", "").strip()
-    if label:
+    if label or is_text_value(settings, index):
         return "{{ " + _quoted(label) + " }}"
+    entity = _quoted(settings[f"entity_{index}"])
     return "{{ (state_attr(" + entity + ", 'friendly_name') or " + entity + ") | string | truncate(80, True, '…') }}"
 
 
 def _value(settings: dict, index: int) -> str:
+    if is_text_value(settings, index):
+        # Literal text must never be evaluated as a user-supplied Jinja template.
+        return "{{ " + _quoted(settings[f"text_{index}"]) + " }}"
     entity = _quoted(settings[f"entity_{index}"])
     unit = settings.get(f"unit_{index}", "").strip()
     # '-' is an explicit request to hide a native unit; empty means automatic.
@@ -140,10 +160,18 @@ def preset_layout(settings: dict[str, Any]) -> dict[str, Any]:
             line(8, 38, 247, 38),
             text(128, 64, _value(settings, 1), 44, 240, "center"),
         ]
-    elif settings["preset"] == "clock_two_values":
-        elements = [
-            text(8, 13, "{{ now().strftime('%H:%M') }}", 28, 112),
-            text(248, 23, "{{ now().strftime('%d.%m.%Y') }}", 16, 122, "right"),
+    elif settings["preset"] in ("clock_two_values", "three_values"):
+        if settings["preset"] == "three_values":
+            header = _value(settings, 3)
+            if not is_text_value(settings, 3):
+                header = _label(settings, 3) + ": " + header
+            elements = [text(128, 13, header, 28, 240, "center")]
+        else:
+            elements = [
+                text(8, 13, "{{ now().strftime('%H:%M') }}", 28, 112),
+                text(248, 23, "{{ now().strftime('%d.%m.%Y') }}", 16, 122, "right"),
+            ]
+        elements += [
             line(8, 42, 247, 42), line(128, 53, 128, 119),
             text(8, 54, _label(settings, 1), 16, 112),
             text(140, 54, _label(settings, 2), 16, 108),

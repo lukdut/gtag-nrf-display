@@ -183,7 +183,7 @@ ssize_t write_control(struct bt_conn *, const struct bt_gatt_attr *,
     //
     // byte 0     : command = 0x01 (BEGIN)
     // byte 1     : protocol version = 1
-    // byte 2     : codec id (0 RAW, 1 WHITE_RLE_V1)
+    // byte 2     : codec id (0 RAW, 1 WHITE_RLE_V1, 2 THREE_VALUES_V1)
     // bytes 3..4 : encoded payload size, little-endian
     // bytes 5..8 : frame/session id
     // bytes 9..12: CRC32 of the DECODED 4096-byte framebuffer
@@ -1107,7 +1107,7 @@ void GTagDisplay::dump_config() {
 #else
   ESP_LOGCONFIG(
       TAG,
-      "GTag Display; protocol-v1 codecs RAW/WHITE_RLE_V1; UUIDs 0011..0016");
+      "GTag Display; protocol-v1 codecs RAW/WHITE_RLE_V1/THREE_VALUES_V1; UUIDs 0011..0017");
 #endif
 #ifdef USE_GTAG_BATTERY
   ESP_LOGCONFIG(TAG, "  Battery: P0.%02u, 1M/1M divider, 5min, calibration=%.4f",

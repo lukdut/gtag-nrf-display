@@ -1,0 +1,63 @@
+{
+  "elements": [
+    {
+      "type": "text",
+      "x": 128,
+      "y": 13,
+      "text": "CO₂: 684 ppm",
+      "size": 28,
+      "max_width": 240,
+      "align": "center"
+    },
+    {
+      "type": "line",
+      "x": 8,
+      "y": 42,
+      "x2": 247,
+      "y2": 42
+    },
+    {
+      "type": "line",
+      "x": 128,
+      "y": 53,
+      "x2": 128,
+      "y2": 119
+    },
+    {
+      "type": "text",
+      "x": 8,
+      "y": 54,
+      "text": "Температура",
+      "size": 16,
+      "max_width": 112,
+      "align": "left"
+    },
+    {
+      "type": "text",
+      "x": 140,
+      "y": 54,
+      "text": "Влажность",
+      "size": 16,
+      "max_width": 108,
+      "align": "left"
+    },
+    {
+      "type": "text",
+      "x": 8,
+      "y": 84,
+      "text": "22.5 °C",
+      "size": 30,
+      "max_width": 112,
+      "align": "left"
+    },
+    {
+      "type": "text",
+      "x": 140,
+      "y": 84,
+      "text": "48 %",
+      "size": 30,
+      "max_width": 108,
+      "align": "left"
+    }
+  ]
+}

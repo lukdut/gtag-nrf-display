@@ -7,7 +7,7 @@ import base64
 from homeassistant.exceptions import HomeAssistantError
 
 from .firmware_info import FirmwareInfo
-from .frame_codec import EncodedFrame, CODEC_RAW
+from .frame_codec import encode_best
 from .frame_protocol import FrameDescriptor, PreparedFrame
 
 ACTIONS = ("gtag_info", "gtag_frame", "gtag_confirm")
@@ -68,20 +68,17 @@ class WifiTransport:
         self.firmware_info = info.attributes()
         return info
 
-    async def async_send(self, raw: bytes, freshness_timeout: int) -> dict:
+    async def async_send(self, raw: bytes, freshness_timeout: int, template_payload: bytes | None = None) -> dict:
         async with self._lock:
             started = self.hass.loop.time()
             info = await self._info()
-            prepared = await self.hass.async_add_executor_job(PreparedFrame.prepare, raw)
-            # Capability negotiation remains valid when new codecs are added.
-            if not info.codecs & (1 << prepared.descriptor.codec):
-                if not info.codecs & (1 << CODEC_RAW):
-                    raise HomeAssistantError("Firmware does not support the selected frame codec")
-                encoded = EncodedFrame(CODEC_RAW, raw, prepared.descriptor.raw_crc32, len(raw))
-                prepared = PreparedFrame(FrameDescriptor.from_encoded(encoded), raw, len(raw), "raw")
+            limit = min(info.max_encoded_size, info.max_chunk_size)
+            try:
+                encoded = await self.hass.async_add_executor_job(encode_best, raw, info.codecs, limit, template_payload)
+            except ValueError as err:
+                raise HomeAssistantError(f"Cannot encode frame for this firmware: {err}") from err
+            prepared = PreparedFrame(FrameDescriptor.from_encoded(encoded), encoded.payload, len(raw), encoded.codec_name)
             descriptor = prepared.descriptor
-            if len(prepared.payload) > min(info.max_encoded_size, info.max_chunk_size):
-                raise HomeAssistantError("Frame exceeds the firmware transfer limit")
             timeout = freshness_timeout if info.freshness else 0
             frame_id, crc = f"{descriptor.frame_id:08x}", f"{descriptor.raw_crc32:08x}"
             data = {"payload": base64.b64encode(prepared.payload).decode("ascii"),

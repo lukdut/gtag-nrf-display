@@ -12,7 +12,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
-from .layouts import DEFAULT_INTERVAL, normalize_saved_timing, preset_layout, validate_settings, value_count
+from .layouts import DEFAULT_INTERVAL, is_text_value, normalize_saved_timing, preset_layout, validate_settings, value_count
 from .render import DYNAMIC_TYPES, LAYOUT_SCHEMA
 
 FORMAT = "gtag-display-layout"
@@ -61,7 +61,9 @@ def _references(text: str) -> tuple[str, list[tuple[int, int, str, bool]]]:
 
 def entity_references(settings: dict) -> list[str]:
     if settings["preset"] != "custom":
-        return list(dict.fromkeys(settings[f"entity_{i}"] for i in range(1, value_count(settings["preset"]) + 1)))
+        return list(dict.fromkeys(settings[f"entity_{i}"]
+                                  for i in range(1, value_count(settings["preset"]) + 1)
+                                  if not is_text_value(settings, i)))
     entities = []
     for element in settings["layout"]["elements"]:
         if element["type"] == "text":
@@ -91,7 +93,8 @@ def remap_settings(settings: dict, mapping: dict[str, str]) -> dict:
     mapping = {source: cv.entity_id(target) for source, target in mapping.items()}
     if result["preset"] != "custom":
         for index in range(1, value_count(result["preset"]) + 1):
-            result[f"entity_{index}"] = mapping[result[f"entity_{index}"]]
+            if not is_text_value(result, index):
+                result[f"entity_{index}"] = mapping[result[f"entity_{index}"]]
     else:
         for element in result["layout"]["elements"]:
             if element["type"] in DYNAMIC_TYPES:
@@ -116,7 +119,10 @@ def _canonical_settings(settings: dict) -> dict:
         result.update(layout=settings["layout"], auto_update=settings["auto_update"])
     else:
         for index in range(1, value_count(settings["preset"]) + 1):
-            for field in ("entity", "label", "unit", "decimals"):
+            if settings["preset"] == "three_values":
+                result[f"source_{index}"] = settings[f"source_{index}"]
+            fields = ("text", "label") if is_text_value(settings, index) else ("entity", "label", "unit", "decimals")
+            for field in fields:
                 result[f"{field}_{index}"] = settings[f"{field}_{index}"]
         if settings["preset"] == "value_graph":
             result["history_hours"] = settings["history_hours"]

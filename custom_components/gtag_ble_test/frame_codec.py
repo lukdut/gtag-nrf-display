@@ -10,10 +10,12 @@ import zlib
 RAW_FRAME_SIZE = 4096
 CODEC_RAW = 0x00
 CODEC_WHITE_RLE_V1 = 0x01
+CODEC_THREE_VALUES_V1 = 0x02
 
 CODEC_NAMES = {
     CODEC_RAW: "raw",
     CODEC_WHITE_RLE_V1: "white_rle_v1",
+    CODEC_THREE_VALUES_V1: "three_values_v1",
 }
 
 
@@ -130,8 +132,9 @@ class EncodedFrame:
         return CODEC_NAMES[self.codec]
 
 
-def encode_best(raw: bytes, supported_codecs: int = 3, max_encoded_size: int = RAW_FRAME_SIZE) -> EncodedFrame:
-    """Use WHITE_RLE only when it is strictly smaller than RAW."""
+def encode_best(raw: bytes, supported_codecs: int = 3, max_encoded_size: int = RAW_FRAME_SIZE,
+                template_payload: bytes | None = None) -> EncodedFrame:
+    """Choose the smallest supported, verified representation of this frame."""
     if len(raw) != RAW_FRAME_SIZE:
         raise ValueError(f"frame must be exactly {RAW_FRAME_SIZE} bytes")
 
@@ -143,6 +146,14 @@ def encode_best(raw: bytes, supported_codecs: int = 3, max_encoded_size: int = R
         compressed = white_rle_v1_encode(raw)
         if len(compressed) <= max_encoded_size:
             candidates.append(EncodedFrame(CODEC_WHITE_RLE_V1, compressed, crc))
+    if (template_payload is not None and supported_codecs & (1 << CODEC_THREE_VALUES_V1)
+            and len(template_payload) <= max_encoded_size):
+        from .template_codec import render_payload
+        try:
+            if render_payload(template_payload) == raw:
+                candidates.append(EncodedFrame(CODEC_THREE_VALUES_V1, template_payload, crc))
+        except (ValueError, OSError):
+            pass  # A malformed/unsupported candidate never disables bitmap fallback.
     if not candidates:
         raise ValueError("No supported codec can encode this frame within the device limit")
     return min(candidates, key=lambda item: len(item.payload))

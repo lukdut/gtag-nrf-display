@@ -454,9 +454,12 @@ class Display:
                     self.status = "sending"
                     self._notify()
                     if self.network is not None:
-                        report_attributes = await self.network.async_send(frame.raw, sent_timeout)
+                        if frame.template_payload is not None:
+                            report_attributes = await self.network.async_send(frame.raw, sent_timeout, frame.template_payload)
+                        else:
+                            report_attributes = await self.network.async_send(frame.raw, sent_timeout)
                     else:
-                        prepared = await self.hass.async_add_executor_job(PreparedFrame.prepare, frame.raw)
+                        prepared = await self.hass.async_add_executor_job(PreparedFrame.prepare, frame.raw, frame.template_payload)
                         async with get_operation_lock(self.hass, self.address):
                             sender = FrameSender(lambda: connect(self.hass, self.address), self.address,
                                                  freshness_timeout=sent_timeout)

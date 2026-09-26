@@ -1,4 +1,4 @@
-"""Protocol-v1 BLE transport for gtag_display: RAW/WHITE_RLE and CRC32.
+"""Protocol-v1 BLE transport: bitmap/template codecs with framebuffer CRC32.
 
 BEGIN/COMMIT use acknowledged writes; bounded data windows use Write Without
 Response with STATUS-confirmed progress, retries, resume and ACK fallback.
@@ -458,7 +458,9 @@ class FrameSender:
                         self.report.firmware_info = info
                         info.validate_transfer(CHUNK_PAYLOAD)
                         # Re-negotiate after each reconnect (including a firmware change).
-                        if info.codecs & (1 << desc.codec) and len(prepared.payload) <= info.max_encoded_size:
+                        if prepared.template_payload is not None and info.codecs & 4:
+                            selected = await asyncio.to_thread(prepared.select, info.codecs, info.max_encoded_size)
+                        elif info.codecs & (1 << desc.codec) and len(prepared.payload) <= info.max_encoded_size:
                             selected = EncodedFrame(desc.codec, prepared.payload, desc.raw_crc32)
                         else:
                             raw_frame = (prepared.payload if desc.codec == 0
