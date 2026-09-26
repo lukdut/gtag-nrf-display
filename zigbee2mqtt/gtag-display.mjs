@@ -66,7 +66,7 @@ function validateFirmwareInfo(info) {
 }
 const infoState = (info) => ({firmware_version: info.firmware_version,
     firmware_capabilities: JSON.stringify(info), firmware_legacy: info.legacy,
-    firmware_codecs: ['raw', 'white_rle_v1', 'three_values_v1'].filter((_, bit) => info.codecs & (1 << bit)).join(', '),
+    firmware_codecs: ['raw', 'white_rle_v1', 'three_values_v1', 'simple_templates_v1'].filter((_, bit) => info.codecs & (1 << bit)).join(', '),
     firmware_features: ['freshness', 'battery_voltage', 'battery_bar', 'battery_protection']
         .filter((_, bit) => info.features & (1 << bit)).join(', ')});
 
@@ -81,12 +81,12 @@ export function crc32(data) {
 
 // Same WHITE_RLE_V1 grammar as BLE. Choose raw if compression isn't smaller.
 export function validTemplate(payload) {
-    if (!Buffer.isBuffer(payload) || payload.length < 12 || payload.length > 4096 ||
-        payload[0] !== 1 || payload[1] !== 1) return false;
+    if (!Buffer.isBuffer(payload) || payload.length < 2 || payload.length > 4096 ||
+        ![1, 2, 3, 4].includes(payload[0]) || payload[1] !== 1) return false;
     let offset = 2;
     try {
         const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < [0, 5, 3, 6, 2][payload[0]]; i++) {
             if (offset + 2 > payload.length) return false;
             const length = payload.readUInt16LE(offset);
             offset += 2;
@@ -116,8 +116,10 @@ export function encodeFrame(raw, codecs = 3, maxSize = 4096, template = null) {
     const candidates = [];
     if ((codecs & 1) && raw.length <= maxSize) candidates.push({payload: raw, codec: 0});
     if ((codecs & 2) && encoded.length <= maxSize) candidates.push({payload: Buffer.from(encoded), codec: 1});
-    if ((codecs & 4) && validTemplate(template) && template.length <= maxSize)
-        candidates.push({payload: template, codec: 2});
+    if (validTemplate(template) && template.length <= maxSize) {
+        const codec = template[0] === 1 ? 2 : 3;
+        if (codecs & (1 << codec)) candidates.push({payload: template, codec});
+    }
     candidates.sort((a, b) => a.payload.length - b.payload.length);
     if (!candidates.length) throw new Error('No supported codec can encode this frame within the device limit');
     return {...candidates[0], crc: crc32(raw)};

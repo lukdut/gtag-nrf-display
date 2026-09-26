@@ -14,7 +14,8 @@ def main() -> None:
                      "layout_transfer.py", "layout_flow.py", "layout_download.py",
                      "connection.py", "diagnostic_flow.py",
                      "widget_data.py", "widget_render.py",
-                     "fonts/DejaVuSans.ttf", "fonts/template_v1.bin", "fonts/LICENSE.txt",
+                     "fonts/DejaVuSans.ttf", "fonts/template_v1.bin", "fonts/template_large_v1.bin",
+                     "fonts/template_clock_v1.bin", "fonts/LICENSE.txt",
                      "translations/en.json", "translations/ru.json", "brand/icon.png"):
         if not (component / required).is_file():
             raise SystemExit(f"Missing required package file: {required}")

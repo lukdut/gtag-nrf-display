@@ -16,6 +16,7 @@ enum class Codec : uint8_t {
   RAW = 0x00,
   WHITE_RLE_V1 = 0x01,
   THREE_VALUES_V1 = 0x02,
+  SIMPLE_TEMPLATES_V1 = 0x03,
 };
 
 enum class DecodeError : uint8_t {
@@ -35,7 +36,8 @@ struct DecodeResult {
 };
 
 inline bool codec_supported(Codec codec) {
-  return codec == Codec::RAW || codec == Codec::WHITE_RLE_V1 || codec == Codec::THREE_VALUES_V1;
+  return codec == Codec::RAW || codec == Codec::WHITE_RLE_V1 || codec == Codec::THREE_VALUES_V1 ||
+         codec == Codec::SIMPLE_TEMPLATES_V1;
 }
 
 inline DecodeResult decode_frame(
@@ -58,8 +60,10 @@ inline DecodeResult decode_frame(
     return {true, DecodeError::NONE, RAW_FRAME_SIZE, RAW_FRAME_SIZE};
   }
 
-  if (codec == Codec::THREE_VALUES_V1) {
-    const bool ok = template_render::render(encoded, encoded_size, raw, raw_size);
+  if (codec == Codec::THREE_VALUES_V1 || codec == Codec::SIMPLE_TEMPLATES_V1) {
+    const bool matching_id = encoded_size >= 2 && (codec == Codec::THREE_VALUES_V1 ? encoded[0] == 1 :
+                                                  encoded[0] >= 2 && encoded[0] <= 4);
+    const bool ok = matching_id && template_render::render(encoded, encoded_size, raw, raw_size);
     return {ok, ok ? DecodeError::NONE : DecodeError::INPUT_SIZE, ok ? encoded_size : 0, ok ? raw_size : 0};
   }
 

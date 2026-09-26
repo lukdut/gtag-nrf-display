@@ -957,8 +957,8 @@ class FirmwareInfoTests(unittest.TestCase):
             variant.firmware_info_read(out)
             info = transport.FirmwareInfo.parse(out.raw)
             info.validate_transfer()
-            self.assertEqual(info.firmware_version, "1.2.0-dev.1")
-            self.assertEqual(info.codecs, 7)
+            self.assertEqual(info.firmware_version, "1.2.0-dev.2")
+            self.assertEqual(info.codecs, 15)
             self.assertEqual(info.features, 15 if battery else 1)
             self.assertEqual(info.max_chunk_size, chunk)
             self.assertFalse(info.legacy)
@@ -968,6 +968,27 @@ class FirmwareInfoTests(unittest.TestCase):
 
 
 class NegotiationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_simple_templates_and_dev1_bitmap_fallback(self):
+        fixtures = json.loads((ROOT / "tests/fixtures/simple-templates-v1.json").read_text())
+        for golden in fixtures:
+            raw, payload = bytes.fromhex(golden["raw"]), bytes.fromhex(golden["payload"])
+            for mask, expected in ((15, 3), (7, 1), (3, 1), (1, 0)):
+                with self.subTest(preset=golden["preset"], mask=mask):
+                    start()
+                    class SelectedClient(Client):
+                        async def read_gatt_char(self, uuid):
+                            value = await super().read_gatt_char(uuid)
+                            if uuid == transport.INFO_CHAR_UUID:
+                                value = value[:4] + mask.to_bytes(4, "little") + value[8:]
+                            return value
+                    prepared = transport.PreparedFrame.prepare(raw, payload)
+                    report = await transport.FrameSender(SelectedClient().connect, "test").send_prepared(prepared)
+                    self.assertEqual(report.codec, expected)
+                    if expected == 3:
+                        self.assertEqual(report.encoded_size, len(payload))
+                    self.assertEqual(bytes(word & 255 for word in words()[-4096:]), raw)
+                    self.assertEqual(fw.firmware_frames(), 1)
+
     async def test_template_delivery_and_bitmap_fallback_on_older_firmware(self):
         golden = json.loads((ROOT / "tests/fixtures/three-values-v1.json").read_text())
         raw, payload = bytes.fromhex(golden["raw"]), bytes.fromhex(golden["payload"])

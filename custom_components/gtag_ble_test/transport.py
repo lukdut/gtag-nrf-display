@@ -458,7 +458,7 @@ class FrameSender:
                         self.report.firmware_info = info
                         info.validate_transfer(CHUNK_PAYLOAD)
                         # Re-negotiate after each reconnect (including a firmware change).
-                        if prepared.template_payload is not None and info.codecs & 4:
+                        if prepared.template_payload is not None and info.codecs & 12:
                             selected = await asyncio.to_thread(prepared.select, info.codecs, info.max_encoded_size)
                         elif info.codecs & (1 << desc.codec) and len(prepared.payload) <= info.max_encoded_size:
                             selected = EncodedFrame(desc.codec, prepared.payload, desc.raw_crc32)

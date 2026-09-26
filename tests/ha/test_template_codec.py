@@ -1,5 +1,6 @@
 """Cross-language pixel agreement and strict parsing of untrusted template data."""
 import ctypes
+from datetime import datetime, timedelta
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -11,11 +12,12 @@ import zlib
 import pytest
 
 from custom_components.gtag_ble_test.frame_codec import encode_best
-from custom_components.gtag_ble_test.render import render_layout
+from custom_components.gtag_ble_test.render import clock_layout, render_layout
 from custom_components.gtag_ble_test.template_codec import encode_strings, render_payload
 
 ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = json.loads((ROOT / "tests/fixtures/three-values-v1.json").read_text())
+SIMPLE = json.loads((ROOT / "tests/fixtures/simple-templates-v1.json").read_text())
 
 
 @pytest.fixture(scope="module")
@@ -27,11 +29,11 @@ using namespace esphome::gtag_display;
 extern "C" bool render(const uint8_t *in, size_t size, uint8_t *out) {
   return template_render::render(in, size, out, 4096);
 }
-extern "C" unsigned font_size() { return sizeof(template_font_v1::DATA); }
-extern "C" int commit(const uint8_t *in, size_t size, unsigned crc) {
+extern "C" unsigned font_size() { return sizeof(template_font_v1::DATA) + sizeof(template_font_large_v1::DATA); }
+extern "C" int commit(const uint8_t *in, size_t size, unsigned crc, uint8_t codec) {
   frame::Receiver receiver;
   frame::Descriptor d;
-  d.codec = frame::Codec::THREE_VALUES_V1; d.encoded_size = size; d.raw_crc32 = crc;
+  d.codec = static_cast<frame::Codec>(codec); d.encoded_size = size; d.raw_crc32 = crc;
   if (receiver.begin(d) == frame::BeginResult::REJECTED) return int(receiver.error());
   receiver.write(0, in, size);
   uint8_t raw[4096];
@@ -47,21 +49,22 @@ extern "C" int commit(const uint8_t *in, size_t size, unsigned crc) {
     native.render.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_void_p]
     native.render.restype = ctypes.c_bool
     native.font_size.restype = ctypes.c_uint32
-    native.commit.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint32]
+    native.commit.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint32, ctypes.c_uint8]
     return native
 
 
 def test_frozen_font_and_approved_screen_match_on_device(native_template):
     font = (ROOT / "custom_components/gtag_ble_test/fonts/template_v1.bin").read_bytes()
     assert sha256(font).hexdigest() == "0022b94a2d8ec2b652d560332f631908ede808197d70f7cfbdf1547e93d091d3"
-    assert native_template.font_size() < 230000  # Fits the legacy nice!nano application region.
+    assert native_template.font_size() < 250000  # UF2 validation separately checks the complete application.
     payload, expected = bytes.fromhex(GOLDEN["payload"]), bytes.fromhex(GOLDEN["raw"])
     assert encode_strings(GOLDEN["strings"]) == payload
     raw = ctypes.create_string_buffer(4096)
     assert native_template.render(payload, len(payload), raw)
     assert raw.raw == render_payload(payload) == expected
-    assert native_template.commit(payload, len(payload), zlib.crc32(expected)) == 0
-    assert native_template.commit(payload, len(payload), zlib.crc32(expected) ^ 1) == 5
+    assert native_template.commit(payload, len(payload), zlib.crc32(expected), 2) == 0
+    assert native_template.commit(payload, len(payload), zlib.crc32(expected) ^ 1, 2) == 5
+    assert native_template.commit(payload, len(payload), zlib.crc32(expected), 3) != 0
 
 
 def test_shrinking_clipping_kerning_and_unicode_match_native(native_template):
@@ -116,3 +119,57 @@ def test_codec_selection_preserves_bitmap_fallback_and_limits():
         encode_best(raw, 7, len(payload) - 1, payload)
     assert encode_best(raw, 7, 4096, payload[:-1]).codec == 1
     assert encode_best(b"\xff" * 4096, 7, 4096, payload).codec == 1
+
+
+@pytest.mark.parametrize("golden", SIMPLE, ids=lambda item: item["preset"])
+def test_simple_template_pixels_negotiation_and_validation(native_template, golden):
+    payload, expected = bytes.fromhex(golden["payload"]), bytes.fromhex(golden["raw"])
+    assert encode_strings(golden["strings"], golden["id"]) == payload
+    assert render_layout(golden["layout"]).template_payload == payload
+    raw = ctypes.create_string_buffer(4096)
+    assert native_template.render(payload, len(payload), raw)
+    assert raw.raw == render_payload(payload) == expected
+    assert native_template.commit(payload, len(payload), zlib.crc32(expected), 3) == 0
+    assert native_template.commit(payload, len(payload), zlib.crc32(expected) ^ 1, 3) == 5
+    assert native_template.commit(payload, len(payload), zlib.crc32(expected), 2) != 0
+    for mask, codec in ((15, 3), (7, 1), (3, 1), (1, 0)):
+        assert encode_best(expected, mask, 4096, payload).codec == codec
+    assert encode_best(expected, 15, len(payload), payload).codec == 3
+    with pytest.raises(ValueError):
+        encode_best(expected, 15, len(payload) - 1, payload)
+    invalid = [payload[:i] for i in range(len(payload))]
+    invalid += [payload + b'x', b'\xff' + payload[1:], payload[:1] + b'\x02' + payload[2:],
+                payload[:2] + b'\xff\xff' + payload[4:]]
+    for bad in invalid:
+        assert not native_template.render(bad, len(bad), raw)
+        with pytest.raises(ValueError):
+            render_payload(bad)
+
+
+@pytest.mark.parametrize("day", range(7))
+@pytest.mark.parametrize("hour,minute", [(0, 0), (1, 11), (12, 34), (16, 37), (23, 59)])
+def test_clock_weekdays_digits_and_centred_time_match_pillow(native_template, day, hour, minute):
+    layout = clock_layout(datetime(2026, 9, 21, hour, minute) + timedelta(days=day))
+    frame = render_layout(layout)
+    assert frame.template_payload is not None
+    raw = ctypes.create_string_buffer(4096)
+    assert native_template.render(frame.template_payload, len(frame.template_payload), raw)
+    assert raw.raw == frame.raw
+
+
+@pytest.mark.parametrize("text", ["Недоступно", "🙂", "office", "Первая\nВторая"])
+def test_large_value_unsupported_shaping_or_fitted_size_keeps_bitmap(text):
+    layout = json.loads(json.dumps(SIMPLE[2]["layout"]))
+    layout["elements"][2]["text"] = text
+    assert render_layout(layout).template_payload is None
+
+
+def test_new_templates_require_unchanged_geometry():
+    for golden in SIMPLE:
+        layout = json.loads(json.dumps(golden["layout"]))
+        layout["elements"][0]["x"] += 1
+        assert render_layout(layout).template_payload is None
+    # Modified clocks and complex widgets keep using the image path.
+    layout = clock_layout(datetime(2026, 9, 26))
+    layout["elements"][1]["text"] = "Сегодня"
+    assert render_layout(layout).template_payload is None

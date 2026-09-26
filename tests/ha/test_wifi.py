@@ -38,7 +38,7 @@ def device(hass):
             data = call.data
             payload = base64.b64decode(data["payload"], validate=True)
             state["raw"] = (payload if data["codec"] == 0 else render_payload(payload)
-                            if data["codec"] == 2 else white_rle_v1_decode(payload))
+                            if data["codec"] in (2, 3) else white_rle_v1_decode(payload))
             state["frame"], state["crc"] = data["frame_id"], data["crc32"]
             return {"rendered": True, "frame_id": state["frame"], "crc32": state["crc"]}
 
@@ -99,6 +99,22 @@ async def test_template_display_negotiates_again_after_firmware_rollback(hass, d
                 assert "three_values_v1" in display.report["firmware_codecs"]
     finally:
         await display.async_close()
+
+
+@pytest.mark.parametrize("index", range(3))
+async def test_simple_template_negotiation_after_dev2_rollback(device, index):
+    dev = device()
+    root = Path(__file__).resolve().parents[2]
+    golden = json.loads((root / "tests/fixtures/simple-templates-v1.json").read_text())[index]
+    raw, payload = bytes.fromhex(golden["raw"]), bytes.fromhex(golden["payload"])
+    for mask, codec in ((15, 3), (7, 1), (3, 1), (1, 0)):
+        dev.state["codecs"] = mask
+        report = await dev.transport.async_send(raw, 300, payload)
+        assert report["codec"] == codec
+        assert dev.state["raw"] == raw
+        if codec == 3:
+            assert report["encoded_size"] == len(payload)
+            assert "simple_templates_v1" in report["firmware_codecs"]
 
 
 @pytest.mark.parametrize("response", [None, {}, {"rendered": False},

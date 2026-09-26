@@ -311,9 +311,9 @@
   "selector": {
     "preset": {
       "options": {
-        "clock": "Clock and date",
-        "single_value": "One large value",
-        "clock_two_values": "Clock and two values",
+        "clock": "🌿 Clock and date",
+        "single_value": "🌿 One large value",
+        "clock_two_values": "🌿 Clock and two values",
         "custom": "Custom layout",
         "weather": "Weather and hourly forecast",
         "value_graph": "Value and history graph",
@@ -395,7 +395,8 @@
         "bluetooth_unavailable": "No connectable Bluetooth advertisement found. Check power, range and the HA Bluetooth adapter/proxy.",
         "communication_error": "Communication failed. Check the details below, power and the selected transport.",
         "transfer_error": "Image transfer failed",
-        "three_values_v1": "Three fields rendered on device"
+        "three_values_v1": "Three fields rendered on device",
+        "simple_templates_v1": "Simple templates rendered on device"
       }
     },
     "diagnostic_action": {

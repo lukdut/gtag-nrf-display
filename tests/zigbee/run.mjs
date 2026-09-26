@@ -69,6 +69,27 @@ const verify = async (raw, frames = 1) => {
 };
 try {
     assert.equal((await lines.next()).value, 'ready');
+    await test('simple templates use codec 3 and fall back on dev.1 and older firmware', async () => {
+        const fixtures = JSON.parse(await readFile(`${root}/tests/fixtures/simple-templates-v1.json`, 'utf8'));
+        for (const golden of fixtures) {
+            const raw = Buffer.from(golden.raw, 'hex'), template = Buffer.from(golden.payload, 'hex');
+            for (const [mask, codec] of [[15, 3], [7, 1], [3, 1], [1, 0]]) {
+                await request('reset');
+                const ep = endpoint(async (phase, packet, ack) => {
+                    if (phase === 'after' && packet[0] === 7) ack.writeUInt32LE(mask, 7);
+                });
+                const result = await transferFrame(ep, raw, {sleep: noSleep, template});
+                assert.equal(result.codec, codec);
+                if (codec === 3) assert.equal(result.bytes, template.length);
+                await verify(raw);
+            }
+            const invalid = [template.subarray(0, template.length - 1), Buffer.concat([template, Buffer.from([0])])];
+            for (const [position, byte] of [[0, 5], [1, 2], [2, 255], [4, 128]]) {
+                const bad = Buffer.from(template); bad[position] = byte; invalid.push(bad);
+            }
+            for (const bad of invalid) assert.equal(encodeFrame(raw, 15, 4096, bad).codec, 1);
+        }
+    });
     await test('template renders on the device and falls back for old firmware', async () => {
         const golden = JSON.parse(await readFile(`${root}/tests/fixtures/three-values-v1.json`, 'utf8'));
         const raw = Buffer.from(golden.raw, 'hex'), template = Buffer.from(golden.payload, 'hex');
@@ -104,7 +125,7 @@ try {
         });
         const raw = Buffer.alloc(4096, 255);
         const first = await transferFrame(rawOnly, raw, {sleep: noSleep});
-        assert.equal(first.info.firmware_version, '1.2.0-dev.1');
+        assert.equal(first.info.firmware_version, '1.2.0-dev.2');
         assert.equal(first.info.features, 15);
         assert.equal(first.codec, 0);
         assert.equal(first.bytes, 4096);
@@ -535,7 +556,7 @@ try {
         const last = states.at(-1);
         assert.equal(last.connection_status, 'ok');
         assert.equal(last.connection_request_id, 'check-1');
-        assert.equal(last.firmware_version, '1.2.0-dev.1');
+        assert.equal(last.firmware_version, '1.2.0-dev.2');
         assert.ok(last.connection_checked_at);
         assert.deepEqual(await request('inspect'), before);
         await converter.connectionConverter.convertSet(null, 'check_connection', 'check', meta);

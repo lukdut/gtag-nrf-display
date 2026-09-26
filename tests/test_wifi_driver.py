@@ -139,6 +139,22 @@ class WifiDriverTests(unittest.TestCase):
             self.fw.wifi_run(100)
             self.assertEqual(self.words(), shown)
 
+    def test_simple_templates_crc_and_codec_id_preserve_previous_frame(self):
+        fixtures = json.loads((ROOT / "tests/fixtures/simple-templates-v1.json").read_text())
+        for golden in fixtures:
+            raw, payload = bytes.fromhex(golden["raw"]), bytes.fromhex(golden["payload"])
+            crc = golden["crc"].encode()
+            self.assertTrue(self.fw.wifi_submit(base64.b64encode(payload), 1, 3, b'00000001', crc, 0))
+            self.fw.wifi_run(100)
+            self.assertTrue(self.fw.wifi_rendered(b'00000001', crc))
+            self.assertEqual(bytes(word & 255 for word in self.words()[-4096:]), raw)
+            shown = self.words()
+            for bad, codec, checksum in ((payload, 2, crc), (payload, 3, b'00000000'),
+                                          (payload[:1] + b'\x02' + payload[2:], 3, crc)):
+                self.assertFalse(self.fw.wifi_submit(base64.b64encode(bad), 1, codec, b'00000002', checksum, 0))
+                self.fw.wifi_run(100)
+                self.assertEqual(self.words(), shown)
+
 
 if __name__ == "__main__":
     unittest.main()
