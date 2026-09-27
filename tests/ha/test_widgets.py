@@ -258,6 +258,7 @@ async def test_graph_ui_preview_apply_reload_and_export(hass, loaded, sent):
     assert result["step_id"] == "values"
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"entity_1": "sensor.temperature", "history_hours": 12, "decimals_1": "1"})
     assert result["step_id"] == "preview" and not result["errors"] and not sent
+    assert "render_notice" not in result["data_schema"].schema
     await apply(hass, result)
     assert len(sent) == 1
     assert (await current_screen(hass, loaded))["history_hours"] == 12
@@ -276,6 +277,7 @@ async def test_weather_ui_rejects_daily_only_then_accepts_hourly(hass, loaded, w
     assert bad["errors"]["entity_1"] == "hourly_forecast_required"
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"entity_1": weather.entity_id})
     assert result["step_id"] == "preview" and not result["errors"]
+    assert "render_notice" not in result["data_schema"].schema
     await apply(hass, result)
     assert (await current_screen(hass, loaded))["preset"] == "weather"
 

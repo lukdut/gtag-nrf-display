@@ -371,25 +371,35 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
                     "screen_revision": secrets.token_hex(8),
                 })
         errors = {}
+        bitmap_fallback = False
         try:
             self._settings = validate_settings(self._settings)
             layout = (clock_layout(dt_util.now()) if self._settings["preset"] == "clock"
                       else preset_layout(self._settings))
             frame = await async_render_layout(self.hass, layout)
             self._preview = await self.hass.async_add_executor_job(preview_svg, frame.raw)
+            bitmap_fallback = (self._settings["preset"] in
+                               ("clock", "single_value", "clock_two_values", "three_values")
+                               and frame.template_payload is None)
         except (HomeAssistantError, vol.Invalid, ValueError, OSError):
             _LOGGER.exception("Unable to render GTag layout preview")
             errors["base"] = "render_failed"
             self._preview = ""
+        fields = {}
+        if bitmap_fallback:
+            # Read-only selector labels use the HA user's language, unlike
+            # backend-generated prose. This notice never blocks Apply.
+            fields[vol.Optional("render_notice", default="bitmap_fallback")] = selector.SelectSelector(
+                selector.SelectSelectorConfig(options=["bitmap_fallback"], translation_key="render_notice",
+                                              mode=selector.SelectSelectorMode.DROPDOWN, read_only=True))
+        fields[vol.Required("action", default="apply")] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=["apply", "edit", "refresh"], translation_key="preview_action",
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            ),
+        )
         return self.async_show_form(
             step_id="preview",
-            data_schema=vol.Schema({
-                vol.Required("action", default="apply"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=["apply", "edit", "refresh"], translation_key="preview_action",
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    ),
-                ),
-            }),
+            data_schema=vol.Schema(fields),
             description_placeholders={"preview": self._preview}, errors=errors, last_step=True,
         )

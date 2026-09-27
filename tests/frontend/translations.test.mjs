@@ -59,6 +59,16 @@ for (const file of ['strings.json', 'translations/en.json', 'translations/ru.jso
     layout_export: data.options.step.export_download.description,
     layout_exported: data.options.abort.layout_exported,
   };
+  test(`${file}: bitmap notice is readable after ICU and Markdown`, () => {
+    const preview = data.options.step.preview;
+    assert.ok(preview.data.render_notice.includes('⚠️'));
+    const label = data.selector.render_notice.options.bitmap_fallback;
+    const message = new IntlMessageFormat(preview.data_description.render_notice, language).format();
+    const html = filterXSS(marked.parse(`${label}\n\n${message}`, {gfm: true, breaks: true}));
+    assert.ok(html.includes('Home Assistant'));
+    assert.ok(html.includes(language === 'ru' ? 'знаков после запятой' : 'decimal places'));
+    assert.ok(!html.includes('INVALID_TAG'));
+  });
   for (const [step, description] of Object.entries(descriptions)) {
     test(`${file}: ${step} formats before Markdown and retains the download target`, () => {
       // HA calls IntlMessageFormat with its default tag parsing, then Markdown

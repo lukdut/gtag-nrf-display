@@ -158,7 +158,11 @@
         "title": "Preview screen",
         "description": "{preview}\n\nThis preview uses the current values. Apply saves the layout and sends it to the display. Edit returns to the settings; refresh updates the preview.",
         "data": {
-          "action": "Next step"
+          "action": "Next step",
+          "render_notice": "⚠️ Image transfer"
+        },
+        "data_description": {
+          "render_notice": "This layout cannot be rendered on the device with the current values. HA will send an image, which may require more radio data. Try shortening the text or reducing decimal places. You can still apply the layout. This notice is updated when you refresh the preview."
         }
       },
       "configure": {
@@ -318,6 +322,11 @@
         "weather": "Weather and hourly forecast",
         "value_graph": "Value and history graph",
         "three_values": "🌿 Three values or text"
+      }
+    },
+    "render_notice": {
+      "options": {
+        "bitmap_fallback": "Rendered in Home Assistant"
       }
     },
     "preview_action": {
