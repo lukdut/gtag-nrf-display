@@ -11,9 +11,9 @@ import re
 from typing import Any
 
 # Pin each transport to its tested package revision.
-FIRMWARE_TAG = "v0.9.0"
-ZIGBEE_FIRMWARE_TAG = "v1.1.1"
-WIFI_FIRMWARE_TAG = "v1.1.1"
+FIRMWARE_TAG = "v1.2.0"
+ZIGBEE_FIRMWARE_TAG = "v1.2.0"
+WIFI_FIRMWARE_TAG = "v1.2.0"
 PACKAGE_ROOT = "github://lukdut/gtag-nrf-display/config/esphome/packages"
 LCD_PINS = ("dio_pin", "clk_pin", "cs_pin", "reset_pin")
 RESERVED_GPIO = {0, 1, 9, 10, 18}

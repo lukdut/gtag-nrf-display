@@ -38,6 +38,8 @@ def main() -> None:
         if f"ref: {tag}\n" not in package.read_text():
             raise SystemExit(f"Wrong component pin in {package}")
     wizard = (ROOT / "custom_components/gtag_ble_test/firmware_config.py").read_text()
+    if not re.search(rf'^FIRMWARE_TAG = "{re.escape(tag)}"$', wizard, re.M):
+        raise SystemExit("The Bluetooth wizard must use the release package tag")
     if f'WIFI_FIRMWARE_TAG = "{tag}"' not in wizard:
         raise SystemExit("The Wi-Fi wizard must use the release package tag")
     if f'ZIGBEE_FIRMWARE_TAG = "{tag}"' not in wizard:

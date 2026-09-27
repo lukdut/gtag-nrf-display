@@ -125,7 +125,7 @@ try {
         });
         const raw = Buffer.alloc(4096, 255);
         const first = await transferFrame(rawOnly, raw, {sleep: noSleep});
-        assert.equal(first.info.firmware_version, '1.2.0-dev.2');
+        assert.equal(first.info.firmware_version, '1.2.0');
         assert.equal(first.info.features, 15);
         assert.equal(first.codec, 0);
         assert.equal(first.bytes, 4096);
@@ -556,7 +556,7 @@ try {
         const last = states.at(-1);
         assert.equal(last.connection_status, 'ok');
         assert.equal(last.connection_request_id, 'check-1');
-        assert.equal(last.firmware_version, '1.2.0-dev.2');
+        assert.equal(last.firmware_version, '1.2.0');
         assert.ok(last.connection_checked_at);
         assert.deepEqual(await request('inspect'), before);
         await converter.connectionConverter.convertSet(null, 'check_connection', 'check', meta);

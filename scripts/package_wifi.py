@@ -38,7 +38,7 @@ Wi-Fi, the HA weather layout, OTA and reconnection were verified on a physical
 ESP32-C3 Super Mini. The WS2812 example was compile-tested only.
 For Auth Expired, try uncommenting power_save_mode and output_power in the YAML,
 then rebuild and flash over USB. Reduced TX power may reduce range.
-Full instructions: https://github.com/lukdut/gtag-nrf-display/blob/v1.1.0/docs/esp32-wifi.md
+Full instructions: https://github.com/lukdut/gtag-nrf-display/blob/v1.2.0/docs/esp32-wifi.md
 """
 
 

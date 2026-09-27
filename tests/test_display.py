@@ -957,7 +957,7 @@ class FirmwareInfoTests(unittest.TestCase):
             variant.firmware_info_read(out)
             info = transport.FirmwareInfo.parse(out.raw)
             info.validate_transfer()
-            self.assertEqual(info.firmware_version, "1.2.0-dev.2")
+            self.assertEqual(info.firmware_version, "1.2.0")
             self.assertEqual(info.codecs, 15)
             self.assertEqual(info.features, 15 if battery else 1)
             self.assertEqual(info.max_chunk_size, chunk)
