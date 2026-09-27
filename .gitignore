@@ -11,3 +11,4 @@ secrets.yaml
 /.nrf-sdk/
 node_modules/
 tests/zigbee/.runtime-*/
+/.idea/
