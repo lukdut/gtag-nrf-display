@@ -80,7 +80,7 @@
 
 ## Обсуждение и лицензия
 
-[Группа проекта в Telegram](https://t.me/g_tag6).
+[Обсудить в Telegram](https://t.me/g_tag6).
 
 Код распространяется по [лицензии MIT](LICENSE).
 Шрифт DejaVu Sans сохраняет свою [лицензию](custom_components/gtag_ble_test/fonts/LICENSE.txt).
