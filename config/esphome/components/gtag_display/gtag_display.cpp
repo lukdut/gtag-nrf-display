@@ -1,5 +1,5 @@
 #include "esphome/core/defines.h"
-#ifndef USE_ESP32
+#if !defined(USE_ESP32) && !defined(USE_ESP8266)
 #include "gtag_display.h"
 #include "boot_logo.h"
 #include "firmware_info.h"
@@ -564,7 +564,7 @@ void GTagDisplay::queue_pattern_(BootPattern pattern) {
       case BootPattern::LOW_BATTERY:
       case BootPattern::BATTERY_ERROR:
 #ifdef USE_GTAG_BATTERY
-        value = pattern == BootPattern::LOW_BATTERY ? battery_messages::LOW[i] : battery_messages::ERROR[i];
+        value = pattern == BootPattern::LOW_BATTERY ? battery_messages::LOW_VOLTAGE[i] : battery_messages::ERROR[i];
 #endif
         break;
       case BootPattern::LOGO: value = boot_logo::FRAME[i]; break;
@@ -960,13 +960,13 @@ void GTagDisplay::sample_battery_() {
     }
     if (state != battery_guard::State::RUNNING) {
       if (this->frames_ == 0 || state != previous) {
-        this->queue_pattern_(state == battery_guard::State::LOW ? BootPattern::LOW_BATTERY
+        this->queue_pattern_(state == battery_guard::State::LOW_VOLTAGE ? BootPattern::LOW_BATTERY
                                                                : BootPattern::BATTERY_ERROR);
         this->enable_loop_soon_any_context();
       }
     } else if (previous != state) {
       // Clear the warning when charging has restored a usable voltage.
-      if (previous == battery_guard::State::LOW || this->frames_ > 0)
+      if (previous == battery_guard::State::LOW_VOLTAGE || this->frames_ > 0)
         this->queue_pattern_(this->boot_pattern_ == BootPattern::NONE ? BootPattern::WHITE : this->boot_pattern_);
       this->start_radio_();
       this->enable_loop_soon_any_context();

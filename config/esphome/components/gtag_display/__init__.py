@@ -1,4 +1,4 @@
-"""G-Tag LCD profiles: nRF52840 BLE/Zigbee and USB-powered ESP32 Wi-Fi."""
+"""G-Tag LCD profiles: nRF52840 BLE/Zigbee and USB-powered ESP Wi-Fi."""
 import re
 import voluptuous as vol
 
@@ -70,7 +70,7 @@ def gpio_number(value):
 
 
 def lcd_pin(value):
-    if CORE.is_esp32:
+    if CORE.is_esp32 or CORE.is_esp8266:
         if not isinstance(value, (str, int)) or isinstance(value, bool):
             raise cv.Invalid("Use a GPIO number; LCD mode and inversion are fixed by the protocol")
         return pins.internal_gpio_output_pin_schema(value)
@@ -126,8 +126,8 @@ def battery_config(value):
         # Package merging may leave enabled-only fields behind; validate them
         # only when measurement is enabled, and never reserve their GPIO.
         return {"enabled": False}
-    if CORE.is_esp32:
-        raise cv.Invalid("The ESP32 Wi-Fi profile uses USB power; set battery_voltage.enabled: false")
+    if CORE.is_esp32 or CORE.is_esp8266:
+        raise cv.Invalid("The Wi-Fi profile uses USB power; set battery_voltage.enabled: false")
     return validate_battery_range(cv.Schema({
         cv.Required("enabled"): cv.boolean,
         cv.Required("pin"): battery_pin,
@@ -164,13 +164,13 @@ def validate_transport(config):
     ):
         raise cv.Invalid("Telemetry sensor IDs require transport: zigbee")
     if config[CONF_TRANSPORT] == "wifi":
-        if not CORE.is_esp32 or "wifi" not in full or "api" not in full:
-            raise cv.Invalid("transport: wifi requires ESP32, wifi and api")
+        if not (CORE.is_esp32 or CORE.is_esp8266) or "wifi" not in full or "api" not in full:
+            raise cv.Invalid("transport: wifi requires ESP32 or ESP8266, wifi and api")
         if "zigbee_id" in config or "zigbee" in full:
             raise cv.Invalid("The Wi-Fi profile cannot include Zigbee")
         return config
     if not CORE.is_nrf52:
-        raise cv.Invalid("BLE and Zigbee profiles require nRF52; use transport: wifi for ESP32")
+        raise cv.Invalid("BLE and Zigbee profiles require nRF52; use transport: wifi for ESP32/ESP8266")
     if "spi" in full or "i2c" in full:
         raise cv.Invalid("The nRF52 battery profile reserves SPI and I2C")
     has_zigbee = "zigbee" in fv.full_config.get()
@@ -187,7 +187,7 @@ FINAL_VALIDATE_SCHEMA = validate_transport
 
 
 async def to_code(config):
-    if CORE.is_esp32:
+    if CORE.is_esp32 or CORE.is_esp8266:
         cg.add_define("USE_GTAG_WIFI")
         var = cg.new_Pvariable(config[CONF_ID])
         await cg.register_component(var, config)

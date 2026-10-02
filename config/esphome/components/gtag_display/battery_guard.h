@@ -3,7 +3,7 @@
 
 namespace esphome::gtag_display::battery_guard {
 
-enum class State : uint8_t { WAITING, LOW, RUNNING, REBOOT };
+enum class State : uint8_t { WAITING, LOW_VOLTAGE, RUNNING, REBOOT };
 
 // Start conservatively: every boot requires the recovery voltage before radio.
 // A runtime undervoltage requests one reboot into the same radio-gated boot.
@@ -20,7 +20,7 @@ class Guard {
     if (state_ == State::RUNNING) {
       if (mv < cutoff_) state_ = State::REBOOT;
     } else {
-      state_ = mv >= recovery_ ? State::RUNNING : State::LOW;
+      state_ = mv >= recovery_ ? State::RUNNING : State::LOW_VOLTAGE;
     }
     return state_;
   }

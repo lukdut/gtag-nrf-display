@@ -1,7 +1,7 @@
 #pragma once
 
 #include "esphome/core/defines.h"
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_ESP8266)
 
 #include <array>
 #include <string>
@@ -13,7 +13,7 @@ namespace esphome::gtag_display {
 
 enum class BootPattern : uint8_t { NONE, WHITE, BLACK, CHECKERBOARD, STRIPES, LOGO, LOW_BATTERY, BATTERY_ERROR };
 
-// USB-powered ESP32: all operations run on the ESPHome main loop. LCD writes
+// USB-powered ESP32/ESP8266: all operations run on the ESPHome main loop. LCD writes
 // are sliced so API, OTA, sensors and addressable-light effects keep running.
 class GTagDisplay : public Component {
  public:
@@ -46,7 +46,6 @@ class GTagDisplay : public Component {
   std::array<GPIOPin *, 4> pins_{};
   std::array<uint8_t, frame::RAW_FRAME_SIZE> display_frame_{};
   std::array<uint8_t, frame::RAW_FRAME_SIZE> decoded_frame_{};
-  std::array<uint8_t, frame::MAX_ENCODED_SIZE> encoded_frame_{};
   freshness::Lease freshness_;
   Stage stage_{Stage::RESET_WAIT};
   BootPattern boot_pattern_{BootPattern::LOGO};
@@ -59,4 +58,4 @@ class GTagDisplay : public Component {
 };
 
 }  // namespace esphome::gtag_display
-#endif  // USE_ESP32
+#endif  // USE_ESP32 || USE_ESP8266

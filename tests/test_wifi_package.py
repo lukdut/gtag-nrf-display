@@ -14,11 +14,19 @@ spec.loader.exec_module(packager)
 
 class WifiPackageTests(unittest.TestCase):
     def test_standalone_sources_without_local_secrets_or_builds(self):
+        for board in ("esp32c3_supermini", "d1_mini"):
+            with self.subTest(board=board):
+                self.check_package(board)
+
+    def check_package(self, board):
+        esp8266 = board == "d1_mini"
+        local_name = "esp8266-gtag-display.yaml" if esp8266 else "esp32-gtag-display.yaml"
+        public_name = "gtag-d1-mini-wifi.yaml" if esp8266 else packager.PUBLIC_NAME
+        package = "packages/esp8266-wifi-base.yaml" if esp8266 else "packages/wifi-base.yaml"
         with tempfile.TemporaryDirectory(prefix="gtag-wifi-package-") as temporary:
             root = Path(temporary)
             config = root / "config/esphome"
-            for name in ("esp32-gtag-display.yaml", "gtag-esp32-c3-wifi.yaml",
-                         "packages/wifi-base.yaml", "examples/wifi-led-strip.yaml"):
+            for name in (local_name, public_name, package, "packages/wifi-common.yaml", "examples/wifi-led-strip.yaml"):
                 dest = config / name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT / "config/esphome" / name, dest)
@@ -35,21 +43,21 @@ class WifiPackageTests(unittest.TestCase):
             original_root = packager.ROOT
             try:
                 packager.ROOT = root
-                archive_path = packager.package_wifi(root / "output")
+                archive_path = packager.package_wifi(root / "output", board=board)
             finally:
                 packager.ROOT = original_root
             with ZipFile(archive_path) as archive:
                 names = set(archive.namelist())
                 self.assertTrue({"LICENSE", "README.txt", "secrets.example.yaml",
-                                 "esp32-gtag-display.yaml", "packages/wifi-base.yaml",
-                                 "components/gtag_display/gtag_display_esp32.cpp",
+                                 local_name, package, "packages/wifi-common.yaml",
+                                 "components/gtag_display/gtag_display_wifi.cpp",
                                  "components/gtag_display/frame_codec.h"} <= names)
                 for name in names:
                     self.assertNotIn(b"PRIVATE_SENTINEL", archive.read(name))
                     self.assertFalse(name.endswith((".bin", ".pyc")))
                     self.assertNotEqual(name, "secrets.yaml")
-            self.assertEqual((root / "output" / packager.PUBLIC_NAME).read_bytes(),
-                             (config / packager.PUBLIC_NAME).read_bytes())
+            self.assertEqual((root / "output" / public_name).read_bytes(),
+                             (config / public_name).read_bytes())
 
 
 if __name__ == "__main__":

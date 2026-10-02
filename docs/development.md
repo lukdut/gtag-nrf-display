@@ -18,6 +18,10 @@
 | Zigbee2MQTT | [gtag-zigbee.yaml](../config/esphome/gtag-zigbee.yaml) | [nrf-gtag-zigbee.yaml](../config/esphome/nrf-gtag-zigbee.yaml) |
 | Super52840, Zigbee, без АЦП | [gtag-super52840-zigbee.yaml](../config/esphome/gtag-super52840-zigbee.yaml) | [nrf-gtag-super52840-zigbee.yaml](../config/esphome/nrf-gtag-super52840-zigbee.yaml) |
 | ESP32-C3, Wi-Fi | [gtag-esp32-c3-wifi.yaml](../config/esphome/gtag-esp32-c3-wifi.yaml) | [esp32-gtag-display.yaml](../config/esphome/esp32-gtag-display.yaml) |
+| D1 mini ESP8266, Wi-Fi | [gtag-d1-mini-wifi.yaml](../config/esphome/gtag-d1-mini-wifi.yaml) | [esp8266-gtag-display.yaml](../config/esphome/esp8266-gtag-display.yaml) |
+
+Неопубликованные версии собирайте по локальному YAML или из автономного
+архива. Для D1 mini: `python3 scripts/package_wifi.py --board d1_mini`.
 
 [GPIO и загрузчики](pin-remapping.md) · [Аккумулятор](battery.md) ·
 [Пример полной конфигурации](device-configuration.md).

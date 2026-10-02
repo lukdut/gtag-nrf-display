@@ -1,0 +1,14 @@
+# D1 mini (ESP8266, 4 MB flash), USB power.
+packages:
+  gtag_wifi: !include wifi-common.yaml
+
+substitutions:
+  gtag_name: gtag-d1-mini-display
+
+esp8266:
+  board: d1_mini
+  early_pin_init: false
+
+api:
+  # HA plus one ESPHome log client. Each active connection consumes RAM.
+  max_connections: 2

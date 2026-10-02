@@ -1,4 +1,4 @@
-"""Trace the production ESP32 driver with GPIO/time/base64 boundaries replaced."""
+"""Trace the shared Wi-Fi driver, including real Base64 and flash read paths."""
 import base64
 import ctypes
 import json
@@ -23,7 +23,7 @@ class HeaderIsolationTests(unittest.TestCase):
             defines.parent.mkdir(parents=True)
             defines.write_text("#define USE_NRF52\n#define USE_ZEPHYR\n")
             source = build / "headers.cpp"
-            source.write_text('#include "gtag_display_esp32.h"\n'
+            source.write_text('#include "gtag_display_wifi.h"\n'
                               'namespace esphome::gtag_display {\n'
                               'enum class BootPattern { LOGO };\n'
                               'class GTagDisplay {};\n}\n')
@@ -33,17 +33,20 @@ class HeaderIsolationTests(unittest.TestCase):
 
 
 class WifiDriverTests(unittest.TestCase):
+    esp8266 = False
+
     @classmethod
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix="gtag-wifi-native-")
         build = Path(cls.temporary.name)
         for name in ("esphome/core/defines.h", "esphome/core/component.h", "esphome/core/gpio.h",
-                     "esphome/core/hal.h", "esphome/core/log.h", "mbedtls/base64.h"):
+                     "esphome/core/hal.h", "esphome/core/log.h", "pgmspace.h"):
             target = build / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text('#include "native_wifi_stubs.h"\n')
         output = build / "wifi.so"
         subprocess.run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fPIC", "-shared",
+                        *(["-DUSE_ESP8266"] if cls.esp8266 else []),
                         "-I", str(build), "-I", str(ROOT / "tests"),
                         "-I", str(ROOT / "config/esphome/components/gtag_display"),
                         str(ROOT / "tests/native_wifi_driver.cpp"), "-o", str(output)], check=True)
@@ -53,22 +56,6 @@ class WifiDriverTests(unittest.TestCase):
         cls.fw.wifi_confirm.argtypes = [ctypes.c_char_p] * 3
         cls.fw.wifi_rendered.argtypes = [ctypes.c_char_p] * 2
         cls.fw.wifi_error.restype = ctypes.c_char_p
-        decode_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t,
-                                      ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t)
-        @decode_type
-        def decode(out, size, length, data, data_size):
-            try:
-                value = base64.b64decode(ctypes.string_at(data, data_size), validate=True)
-                if len(value) > size:
-                    return -1
-                ctypes.memmove(out, value, len(value))
-                length[0] = len(value)
-                return 0
-            except ValueError:
-                return -1
-        cls.decoder = decode
-        cls.fw.wifi_decoder.argtypes = [decode_type]
-        cls.fw.wifi_decoder(decode)
 
     @classmethod
     def tearDownClass(cls):
@@ -154,6 +141,43 @@ class WifiDriverTests(unittest.TestCase):
                 self.assertFalse(self.fw.wifi_submit(base64.b64encode(bad), 1, codec, b'00000002', checksum, 0))
                 self.fw.wifi_run(100)
                 self.assertEqual(self.words(), shown)
+
+    def test_base64_padding_and_boundaries_preserve_previous_frame(self):
+        self.assertTrue(self.submit(b'\xff' * 4096))
+        self.fw.wifi_run(100)
+        shown = self.words()
+        encoded = base64.b64encode(b'\xff' * 4096)
+        for bad in (b'', b'A', b'====', b'AA=A', b'AA==AAAA', b'AB==', b'AAB=',
+                    encoded[:-1], encoded + b'\n', encoded[:-3] + b'x==',
+                    b'!' + encoded[1:], b'\xff' + encoded[1:],
+                    base64.b64encode(b'\x00' * 4097), b'AAAA' * 1366):
+            with self.subTest(payload=bad[:20]):
+                self.assertFalse(self.fw.wifi_submit(bad, 1, 1, b'00000002', self.crc, 0))
+                self.fw.wifi_run(100)
+                self.assertEqual(self.words(), shown)
+                self.assertTrue(self.fw.wifi_rendered(b'00000001', self.crc))
+
+    def test_raw_frame_uses_two_persistent_buffers(self):
+        self.assertLess(self.fw.wifi_component_size(), 9000)
+
+    def test_boot_logo_matches_generated_frame(self):
+        import re
+        expected = bytes(int(v, 16) for v in re.findall(r'0x([0-9A-F]{2})',
+            (ROOT / 'config/esphome/components/gtag_display/boot_logo.h').read_text()))
+        self.fw.wifi_logo()
+        self.fw.wifi_run(250)
+        self.assertEqual(bytes(word & 255 for word in self.words()[-4096:]), expected)
+        if self.esp8266:
+            self.assertGreaterEqual(self.fw.wifi_flash_reads(), 4096)
+
+
+class Esp8266WifiDriverTests(WifiDriverTests):
+    esp8266 = True
+
+    def test_template_reads_flash_and_yields_to_wifi(self):
+        self.test_simple_templates_crc_and_codec_id_preserve_previous_frame()
+        self.assertGreater(self.fw.wifi_flash_reads(), 1000)
+        self.assertGreater(self.fw.wifi_yields(), 10)
 
 
 if __name__ == "__main__":

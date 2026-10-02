@@ -29,7 +29,7 @@ def public_packages():
     with tempfile.TemporaryDirectory(prefix="gtag-public-config-") as temporary:
         folder = Path(temporary)
         shutil.copytree(CONFIG / "packages", folder / "packages")
-        for profile in ("ble", "zigbee"):
+        for profile in ("ble", "zigbee", "wifi", "esp8266-wifi"):
             package = folder / "packages" / f"{profile}.yaml"
             text, count = re.subn(
                 r"      type: git\n      url: https://github.com/lukdut/gtag-nrf-display.git\n"

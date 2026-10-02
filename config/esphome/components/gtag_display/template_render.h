@@ -7,6 +7,9 @@
 #include "template_font_v1.h"
 #include "template_font_large_v1.h"
 #include "template_clock_v1.h"
+#ifdef USE_ESP8266
+#include "esphome/core/hal.h"
+#endif
 
 namespace esphome::gtag_display::template_render {
 
@@ -23,7 +26,7 @@ inline int signed_word(const uint8_t *p) { const auto v = u16(p); return v < 327
 
 struct Font {
   const uint8_t *data{template_font_v1::DATA};
-  uint16_t count{u16(data + 10)};
+  uint16_t count{flash_storage::u16(data + 10)};
   const uint8_t *glyphs{nullptr};
   const uint8_t *pairs{nullptr};
   uint32_t curves_offset{template_font_v1::KERN_CURVES_OFFSET};
@@ -40,67 +43,71 @@ struct Font {
       sparse = true;
     }
     const auto *entry = data + 12 + count * 2 + size_index * 8;
-    glyphs = data + u32(entry);
-    pairs = data + u32(entry + 4);
+    glyphs = data + flash_storage::u32(entry);
+    pairs = data + flash_storage::u32(entry + 4);
   }
   int find(uint32_t cp) const {
     size_t lo = 0, hi = count;
     while (lo < hi) {
       const size_t mid = (lo + hi) / 2;
-      if (u16(data + 12 + mid * 2) < cp) lo = mid + 1;
+      if (flash_storage::u16(data + 12 + mid * 2) < cp) lo = mid + 1;
       else hi = mid;
     }
-    return lo < count && u16(data + 12 + lo * 2) == cp ? int(lo) : -1;
+    return lo < count && flash_storage::u16(data + 12 + lo * 2) == cp ? int(lo) : -1;
   }
   const uint8_t *glyph(uint16_t index) const {
-    static constexpr uint8_t missing[10] = {0, 0, 0, 0, 0, 0, 0, 0, 255, 255};
+    static constexpr uint8_t missing[10] GTAG_PROGMEM = {0, 0, 0, 0, 0, 0, 0, 0, 255, 255};
     if (!glyphs) return missing;
     if (!sparse) return glyphs + index * 10;
-    size_t lo = 0, hi = u16(glyphs);
+    size_t lo = 0, hi = flash_storage::u16(glyphs);
     while (lo < hi) {
       const size_t mid = (lo + hi) / 2;
-      if (u16(glyphs + 2 + mid * 12) < index) lo = mid + 1;
+      if (flash_storage::u16(glyphs + 2 + mid * 12) < index) lo = mid + 1;
       else hi = mid;
     }
     const auto *record = glyphs + 2 + lo * 12;
-    return lo < u16(glyphs) && u16(record) == index ? record + 2 : missing;
+    return lo < flash_storage::u16(glyphs) && flash_storage::u16(record) == index ? record + 2 : missing;
   }
   // Only immutable, generated font bytes use this bounded per-glyph decoder.
   const uint8_t *bitmap(const uint8_t *glyph, uint8_t *scratch, size_t capacity) const {
-    const uint32_t offset = u32(glyph);
+    const uint32_t offset = flash_storage::u32(glyph);
     const uint8_t *input = data + (offset & 0x7FFFFFFFU);
-    if (!(offset & 0x80000000U)) return input;
-    const size_t length = (size_t(glyph[4]) * glyph[5] + 7) / 8;
+    const size_t length = (size_t(flash_storage::byte(glyph + 4)) * flash_storage::byte(glyph + 5) + 7) / 8;
     if (length > capacity) return nullptr;
+    if (!(offset & 0x80000000U)) {
+      flash_storage::copy(scratch, input, length);
+      return scratch;
+    }
     size_t pos = 0;
     while (pos < length) {
-      const uint8_t flags = *input++;
+      const uint8_t flags = flash_storage::byte(input++);
       for (unsigned bit = 0; bit < 8 && pos < length; ++bit) {
         if (flags & (1U << bit)) {
-          const size_t distance = *input++, count = *input++;
+          const size_t distance = flash_storage::byte(input++), count = flash_storage::byte(input++);
           if (!distance || distance > pos || count < 3 || count > length - pos) return nullptr;
           for (size_t i = 0; i < count; ++i, ++pos) scratch[pos] = scratch[pos - distance];
-        } else scratch[pos++] = *input++;
+        } else scratch[pos++] = flash_storage::byte(input++);
       }
     }
     return scratch;
   }
   int kern(uint16_t first, uint16_t second) const {
     const uint32_t key = uint32_t(first) * count + second;
-    size_t lo = 0, hi = u16(pairs);
+    size_t lo = 0, hi = flash_storage::u16(pairs);
     while (lo < hi) {
       const size_t mid = (lo + hi) / 2;
-      if (u32(pairs + 2 + mid * 6) < key) lo = mid + 1;
+      if (flash_storage::u32(pairs + 2 + mid * 6) < key) lo = mid + 1;
       else hi = mid;
     }
     const auto *pair = pairs + 2 + lo * 6;
-    if (lo == u16(pairs) || u32(pair) != key) return 0;
-    return signed_word(data + curves_offset + (u16(pair + 4) * sizes + size_index) * 2);
+    if (lo == flash_storage::u16(pairs) || flash_storage::u32(pair) != key) return 0;
+    const auto value = flash_storage::u16(data + curves_offset + (flash_storage::u16(pair + 4) * sizes + size_index) * 2);
+    return value < 32768 ? int(value) : int(value) - 65536;
   }
   int measure(const uint16_t *indexes, size_t length) const {
     int result = 0;
     for (size_t i = 0; i < length; ++i) {
-      result += u16(glyph(indexes[i]) + 8);
+      result += flash_storage::u16(glyph(indexes[i]) + 8);
       if (i) result += kern(indexes[i - 1], indexes[i]);
     }
     return result;
@@ -156,10 +163,14 @@ inline bool text(uint8_t *raw, const uint8_t *value, size_t length, Slot slot) {
   size_t count = 0;
   if (!utf8(value, length, indexes.data(), count)) return false;
   while (true) {
+#ifdef USE_ESP8266
+    // Font lookup and shrinking long labels must keep the Wi-Fi stack alive.
+    yield();
+#endif
     const Font candidate(slot.size);
     if (!candidate.glyphs) return false;
     for (size_t i = 0; i < count; ++i)
-      if (u16(candidate.glyph(indexes[i]) + 8) == 65535) return false;
+      if (flash_storage::u16(candidate.glyph(indexes[i]) + 8) == 65535) return false;
     if (!slot.width || slot.size == 8 || candidate.measure(indexes.data(), count) <= slot.width * 64) break;
     --slot.size;
   }
@@ -180,24 +191,29 @@ inline bool text(uint8_t *raw, const uint8_t *value, size_t length, Slot slot) {
   int top = 127;
   for (size_t i = 0; i < count; ++i) {
     const auto *glyph = font.glyph(indexes[i]);
-    if (glyph[5] && signed_byte(glyph[7]) < top) top = signed_byte(glyph[7]);
+    const int glyph_top = signed_byte(flash_storage::byte(glyph + 7));
+    if (flash_storage::byte(glyph + 5) && glyph_top < top) top = glyph_top;
   }
   if (top == 127) top = 0;
   int pen = 0;
   std::array<uint8_t, 512> scratch{};
   for (size_t i = 0; i < count; ++i) {
+#ifdef USE_ESP8266
+    yield();
+#endif
     const auto *glyph = font.glyph(indexes[i]);
     const auto *bitmap = font.bitmap(glyph, scratch.data(), scratch.size());
     if (!bitmap) return false;
-    const int width = glyph[4], height = glyph[5];
-    const int origin = slot.x + (pen + 32) / 64 + signed_byte(glyph[6]);
+    const int width = flash_storage::byte(glyph + 4), height = flash_storage::byte(glyph + 5);
+    const int origin = slot.x + (pen + 32) / 64 + signed_byte(flash_storage::byte(glyph + 6));
+    const int origin_y = slot.y + signed_byte(flash_storage::byte(glyph + 7)) - top;
     for (int row = 0; row < height; ++row)
       for (int column = 0; column < width; ++column) {
         const int bit = row * width + column;
         if (bitmap[bit / 8] & (1U << (bit % 8)))
-          pixel(raw, origin + column, slot.y + signed_byte(glyph[7]) - top + row);
+          pixel(raw, origin + column, origin_y + row);
       }
-    pen += u16(glyph + 8);
+    pen += flash_storage::u16(glyph + 8);
     if (i + 1 < count) pen += font.kern(indexes[i], indexes[i + 1]);
   }
   return true;
@@ -235,7 +251,7 @@ inline bool render(const uint8_t *payload, size_t length, uint8_t *raw, size_t r
     if (day == 7) return false;
     const auto *weekday = template_clock_v1::WEEKDAYS + day * 65;
     for (int bit = 0; bit < 520; ++bit)
-      if (weekday[bit / 8] & (1U << (bit % 8))) pixel(raw, 222 + bit % 26, 10 + bit / 26);
+      if (flash_storage::byte(weekday + bit / 8) & (1U << (bit % 8))) pixel(raw, 222 + bit % 26, 10 + bit / 26);
   }
   for (size_t i = id == 2 ? 1 : 0; i < fields; ++i)
     if (!text(raw, payload + positions[i], lengths[i], slots[i])) return false;

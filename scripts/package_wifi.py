@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package standalone ESP32 sources without credentials or test firmware."""
+"""Package standalone Wi-Fi sources without credentials or test firmware."""
 import argparse
 from pathlib import Path
 import shutil
@@ -38,32 +38,58 @@ Wi-Fi, the HA weather layout, OTA and reconnection were verified on a physical
 ESP32-C3 Super Mini. The WS2812 example was compile-tested only.
 For Auth Expired, try uncommenting power_save_mode and output_power in the YAML,
 then rebuild and flash over USB. Reduced TX power may reduce range.
-Full instructions: https://github.com/lukdut/gtag-nrf-display/blob/v1.2.0/docs/esp32-wifi.md
+Full instructions: https://github.com/lukdut/gtag-nrf-display/blob/v1.3.0/docs/esp32-wifi.md
 """
 
 
-def package_wifi(dist: Path | None = None) -> Path:
+def package_wifi(dist: Path | None = None, *, board: str = "esp32c3_supermini") -> Path:
+    if board not in ("esp32c3_supermini", "d1_mini"):
+        raise ValueError(f"Unsupported Wi-Fi board: {board}")
     config = ROOT / "config/esphome"
     dist = dist if dist is not None else ROOT / "dist"
     dist.mkdir(parents=True, exist_ok=True)
-    files = [config / "esp32-gtag-display.yaml", config / "packages/wifi-base.yaml",
-             config / "examples/wifi-led-strip.yaml"]
+    esp8266 = board == "d1_mini"
+    local_name = "esp8266-gtag-display.yaml" if esp8266 else "esp32-gtag-display.yaml"
+    package = "esp8266-wifi-base.yaml" if esp8266 else "wifi-base.yaml"
+    public_name = "gtag-d1-mini-wifi.yaml" if esp8266 else PUBLIC_NAME
+    archive_name = "gtag-d1-mini-wifi-esphome.zip" if esp8266 else ARCHIVE_NAME
+    readme = README
+    if esp8266:
+        readme = readme[:readme.index("Wi-Fi, the HA weather layout")]
+        readme = readme.replace("ESP32-C3 Super Mini", "D1 mini (ESP8266, 4 MB flash)")
+        readme = readme.replace("esp32-gtag-display.yaml", local_name).replace(PUBLIC_NAME, public_name)
+        readme = readme.replace("USB powers the ESP32", "USB powers the ESP8266")
+        readme = readme.replace(" and examples/", "")
+        readme = readme.replace(" See examples/wifi-led-strip.yaml for an optional WS2812 strip.", "")
+        readme += ("DIO=D2/GPIO4, CLK=D1/GPIO5, CS=D6/GPIO12, RESET=D5/GPIO14.\n"
+                   "All four frame codecs are supported. The profile limits API clients to\n"
+                   "two (HA plus logs) to conserve RAM. Additional components need a memory check.\n"
+                   "Verified on a physical ESP8266EX with 4 MB flash: Wi-Fi, encrypted API,\n"
+                   "RAW/RLE, four templates and encrypted OTA with two API clients connected.\n"
+                   "The user confirmed a visible LCD image. Long-term stability, heap headroom\n"
+                   "and a complete HA setup remain to be checked.\n"
+                   "See docs/esp8266-wifi.md in the project for wiring and verification steps.\n")
+    files = [config / local_name, config / "packages" / package, config / "packages/wifi-common.yaml"]
+    if not esp8266:
+        files.append(config / "examples/wifi-led-strip.yaml")
     files += sorted(p for p in (config / "components/gtag_display").iterdir()
                     if p.is_file() and p.suffix in {".py", ".h", ".cpp"})
-    path = dist / ARCHIVE_NAME
+    path = dist / archive_name
     with ZipFile(path, "w", ZIP_DEFLATED) as archive:
         archive.write(ROOT / "LICENSE", "LICENSE")
-        archive.writestr("README.txt", README)
+        archive.writestr("README.txt", readme)
         archive.writestr("secrets.example.yaml", 'wifi_ssid: ""\nwifi_password: ""\n'
                          'gtag_api_key: ""\ngtag_ota_password: ""\n')
         for file in files:
             archive.write(file, file.relative_to(config))
-    shutil.copyfile(config / PUBLIC_NAME, dist / PUBLIC_NAME)
-    print(f"Packaged Wi-Fi: {path.name}, {PUBLIC_NAME}")
+    shutil.copyfile(config / public_name, dist / public_name)
+    print(f"Packaged Wi-Fi: {path.name}, {public_name}")
     return path
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist", type=Path, help="Override the output directory")
-    package_wifi(parser.parse_args().dist)
+    parser.add_argument("--board", choices=("esp32c3_supermini", "d1_mini"), default="esp32c3_supermini")
+    args = parser.parse_args()
+    package_wifi(args.dist, board=args.board)

@@ -80,7 +80,7 @@
       },
       "firmware": {
         "title": "Подготовить прошивку",
-        "description": "Создайте YAML для ESPHome Device Builder 2026.9.0. nRF52840 прошивается файлом UF2, ESP32-C3 — через USB средствами ESPHome, затем по Wi-Fi (OTA).",
+        "description": "Создайте YAML для ESPHome Device Builder 2026.9.0. nRF52840 прошивается файлом UF2, ESP32-C3 и D1 mini (ESP8266) — через USB средствами ESPHome, затем по Wi-Fi (OTA).",
         "data": {
           "board": "Плата и загрузчик",
           "transport": "Способ связи",
@@ -89,12 +89,12 @@
         },
         "data_description": {
           "name": "Уникальное имя для каждого экрана: 1–31 символ, строчные латинские буквы, цифры и дефисы; без дефиса в начале и конце.",
-          "board": "Pro Micro / Super Mini: загрузчик nice!nano S140 6.x. Super52840: штатный XIAO S140 7.x, пока только Zigbee. ESP32-C3 Super Mini: Wi-Fi, USB."
+          "board": "Pro Micro / Super Mini: загрузчик nice!nano S140 6.x. Super52840: штатный XIAO S140 7.x, пока только Zigbee. ESP32-C3 Super Mini: Wi-Fi, USB. D1 mini (ESP8266, 4 МБ flash): Wi-Fi, USB."
         }
       },
       "firmware_pins": {
         "title": "Подключение экрана",
-        "description": "Укажите GPIO по своей схеме: P0.11 / P1.04 для nRF52840, GPIO0 / GPIO1 для ESP32-C3. Сохраните питание экрана, общую GND и штатное тактирование DisplayCLK/S1. ESP32-C3 питается от USB; GPIO18/19 оставьте для USB.",
+        "description": "Укажите GPIO по своей схеме: P0.11 / P1.04 для nRF52840, GPIO0 / GPIO1 для ESP32-C3. Сохраните питание экрана, общую GND и штатное тактирование DisplayCLK/S1. ESP32-C3 питается от USB; GPIO18/19 оставьте для USB. D1 mini: D2=GPIO4 (DIO), D1=GPIO5 (CLK), D6=GPIO12 (CS), D5=GPIO14 (RESET); питание от USB.",
         "data": {
           "dio_pin": "DIO",
           "clk_pin": "CLK",
@@ -121,14 +121,14 @@
       },
       "firmware_download": {
         "title": "Конфигурация готова",
-        "description": "{download_link_start}Скачать {filename}{download_link_end}\n\nПрошивка: **{firmware_tag}**. Для скачивания нажмите ссылку выше. Кнопка Submit выполняет выбранное действие; при завершении ссылка появится ещё раз на итоговом экране и будет доступна 20 минут.\n\nСоздайте конфигурацию в ESPHome Device Builder и вставьте YAML. Для nRF52840 скачайте UF2 и скопируйте на диск загрузчика; Zigbee требует конвертер той же версии. Для ESP32-C3 выполните первую установку через USB средствами ESPHome, затем добавьте устройство в интеграции ESPHome и GTag Display → Wi-Fi. Последующие прошивки можно устанавливать по Wi-Fi.\n\nМожно также скопировать YAML:\n\n```yaml\n{yaml}\n```",
+        "description": "{download_link_start}Скачать {filename}{download_link_end}\n\nПрошивка: **{firmware_tag}**. Для скачивания нажмите ссылку выше. Кнопка Submit выполняет выбранное действие; при завершении ссылка появится ещё раз на итоговом экране и будет доступна 20 минут.\n\nСоздайте конфигурацию в ESPHome Device Builder и вставьте YAML. Для nRF52840 скачайте UF2 и скопируйте на диск загрузчика; Zigbee требует конвертер той же версии. Для ESP32-C3 и D1 mini (ESP8266) выполните первую установку через USB средствами ESPHome, затем добавьте устройство в интеграции ESPHome и GTag Display → Wi-Fi. Последующие прошивки можно устанавливать по Wi-Fi.\n\nМожно также скопировать YAML:\n\n```yaml\n{yaml}\n```",
         "data": {
           "action": "Дальше"
         }
       },
       "wifi": {
         "title": "Подключение по Wi-Fi",
-        "description": "Сначала прошейте ESP32-C3 и добавьте его в стандартную интеграцию ESPHome. Здесь отображаются подключённые устройства с прошивкой GTag Wi-Fi.",
+        "description": "Сначала прошейте ESP32-C3 или D1 mini (ESP8266) и добавьте его в стандартную интеграцию ESPHome. Здесь отображаются подключённые устройства с прошивкой GTag Wi-Fi.",
         "data": {
           "esphome_entry_id": "Устройство ESPHome"
         }
@@ -156,7 +156,7 @@
       "converter_update_required": "Обновите внешний конвертер gtag-display.mjs в Zigbee2MQTT из этого комплекта.",
       "invalid_board": "Выберите поддерживаемую плату.",
       "invalid_transport": "Выберите Bluetooth, Zigbee или Wi-Fi.",
-      "unsupported_profile": "Выберите Wi-Fi для ESP32-C3, Bluetooth или Zigbee для Pro Micro, Zigbee для Super52840.",
+      "unsupported_profile": "Выберите Wi-Fi для ESP32-C3 или D1 mini (ESP8266), Bluetooth или Zigbee для Pro Micro, либо Zigbee для Super52840.",
       "invalid_device_name": "Нужно 1–31 строчных латинских букв, цифр или дефисов; без дефиса в начале и конце.",
       "invalid_friendly_name": "Введите 1–80 символов без переносов строк и подстановок ESPHome.",
       "invalid_gpio": "Укажите GPIO в формате P0.00…P0.31 или P1.00…P1.15.",
@@ -168,9 +168,10 @@
       "invalid_recovery_voltage": "Порог восстановления должен быть выше порога 0% и не выше порога 100%.",
       "firmware_download_unavailable": "Не удалось создать ссылку. Скопируйте YAML ниже или обновите ссылку.",
       "no_wifi_devices": "Нет доступных GTag Wi-Fi. Добавьте прошитую плату в интеграцию ESPHome и дождитесь подключения.",
-      "usb_power_only": "ESP32-C3 использует питание от USB.",
+      "usb_power_only": "Wi-Fi-платы ESP32-C3 и D1 mini питаются от USB.",
       "invalid_esp32_gpio": "Используйте свободный GPIO0, 1, 3–7, 10, 20 или 21; USB и загрузочные пины зарезервированы.",
-      "invalid_wifi_settings": "Проверьте имя сети и пароль Wi-Fi (8–63 байта)."
+      "invalid_wifi_settings": "Проверьте имя сети и пароль Wi-Fi (8–63 байта).",
+      "invalid_esp8266_gpio": "Используйте свободный GPIO4, 5, 12, 13, 14 или 16. Выводы flash, загрузки и UART зарезервированы; D1 означает GPIO5, D2 — GPIO4."
     }
   },
   "options": {
@@ -396,7 +397,8 @@
       "options": {
         "promicro": "Pro Micro / Super Mini / nice!nano — S140 6.x",
         "super52840": "Super52840 — загрузчик XIAO S140 7.x",
-        "esp32c3_supermini": "ESP32-C3 Super Mini (USB, Wi-Fi)"
+        "esp32c3_supermini": "ESP32-C3 Super Mini (USB, Wi-Fi)",
+        "d1_mini": "D1 mini ESP8266 (USB, Wi-Fi)"
       }
     },
     "firmware_transport": {

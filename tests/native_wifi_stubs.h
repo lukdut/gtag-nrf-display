@@ -6,7 +6,9 @@
 #include <string>
 #include <vector>
 
+#ifndef USE_ESP8266
 #define USE_ESP32
+#endif
 #define USE_GTAG_WIFI
 #define ESP_LOGCONFIG(tag, ...) ((void)tag)
 #define LOG_PIN(label, pin) ((void)pin)
@@ -17,13 +19,20 @@ inline bool levels[4]{};
 inline uint16_t word = 0;
 inline unsigned bits = 0;
 inline std::vector<uint16_t> words;
-using Decode = int (*)(unsigned char *, size_t, size_t *, const unsigned char *, size_t);
-inline Decode decode;
+inline unsigned flash_reads = 0, yields = 0;
 }
-inline int mbedtls_base64_decode(unsigned char *out, size_t size, size_t *length, const unsigned char *in, size_t in_size) {
-  return wifi_sim::decode(out, size, length, in, in_size);
+#define PROGMEM __attribute__((section("gtag_flash"), aligned(4)))
+inline uint8_t pgm_read_byte(const void *p) {
+  ++wifi_sim::flash_reads;
+  return *static_cast<const uint8_t *>(p);
+}
+inline void *memcpy_P(void *out, const void *in, size_t size) {
+  for (size_t i = 0; i < size; ++i)
+    static_cast<uint8_t *>(out)[i] = pgm_read_byte(static_cast<const uint8_t *>(in) + i);
+  return out;
 }
 namespace esphome {
+inline void yield() { ++wifi_sim::yields; }
 inline uint32_t millis() { return wifi_sim::now_us / 1000; }
 inline void delay_microseconds_safe(uint32_t us) { wifi_sim::now_us += us; }
 class Component {

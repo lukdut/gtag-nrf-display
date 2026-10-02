@@ -1,6 +1,6 @@
-# USB-powered ESP32-C3 profile, pinned to the matching component release.
+# USB-powered D1 mini profile, pinned to the matching component release.
 packages:
-  gtag_base: !include wifi-base.yaml
+  gtag_base: !include esp8266-wifi-base.yaml
 
 external_components:
   - source:

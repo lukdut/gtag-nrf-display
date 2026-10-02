@@ -28,8 +28,8 @@ int main() {
   Guard guard;
   guard.configure(3306, 3450);
   assert(guard.update(0xFFFF) == State::WAITING);
-  assert(guard.update(3400) == State::LOW);
-  assert(guard.update(3449) == State::LOW);
+  assert(guard.update(3400) == State::LOW_VOLTAGE);
+  assert(guard.update(3449) == State::LOW_VOLTAGE);
   assert(guard.update(3450) == State::RUNNING);
   assert(guard.update(0xFFFF) == State::RUNNING);
   assert(guard.update(3306) == State::RUNNING);

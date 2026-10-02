@@ -14,6 +14,7 @@ ARTIFACTS = (
     "gtag-ble.yaml", "gtag-zigbee.yaml", "gtag-display.mjs",
     "gtag-super52840-zigbee.uf2", "gtag-super52840-zigbee-esphome.zip", "gtag-super52840-zigbee.yaml",
     "gtag-esp32-c3-wifi-esphome.zip", "gtag-esp32-c3-wifi.yaml",
+    "gtag-d1-mini-wifi-esphome.zip", "gtag-d1-mini-wifi.yaml",
     "LICENSE",
 )
 
@@ -22,6 +23,7 @@ def main() -> None:
     dist = Path(__file__).resolve().parents[1] / "dist"
     shutil.copyfile(dist.parent / "LICENSE", dist / "LICENSE")
     package_wifi(dist)
+    package_wifi(dist, board="d1_mini")
     for name in ARTIFACTS[1:]:
         if not (dist / name).is_file():
             raise SystemExit(f"Missing release artifact: {name}")

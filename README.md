@@ -13,6 +13,7 @@
 | nRF52840 Pro Micro / Super Mini / nice!nano | Zigbee2MQTT или Bluetooth | Аккумулятор |
 | Super52840 | Zigbee2MQTT, отдельный профиль | Аккумулятор |
 | ESP32-C3 Super Mini | Wi-Fi через ESPHome | USB |
+| D1 mini ESP8266 (с 1.3.0, проверена на плате) | Wi-Fi через ESPHome | USB |
 
 | До: исходный ценник | После: данные Home Assistant |
 |:---:|:---:|
@@ -39,7 +40,8 @@
 1. **Подготовьте ценник и подключите плату.**
    [Подготовка экрана](docs/display-preparation.md) ·
    [GPIO nRF52840](docs/pin-remapping.md) ·
-   [ESP32-C3 и Wi-Fi](docs/esp32-wifi.md).
+   [ESP32-C3 и Wi-Fi](docs/esp32-wifi.md) ·
+   [D1 mini ESP8266 и Wi-Fi](docs/esp8266-wifi.md).
 2. **Установите GTag Display через HACS.** Добавьте
    `https://github.com/lukdut/gtag-nrf-display` как репозиторий типа **Integration**,
    скачайте интеграцию и перезапустите HA.
@@ -50,7 +52,7 @@
    [Полный пример конфигурации](docs/device-configuration.md).
 4. **Подключите устройство к HA.** Для Zigbee установите
    [конвертер и добавьте экран через Zigbee2MQTT](docs/zigbee-home-assistant.md).
-   Для Bluetooth выберите обнаруженный GTag; ESP32 сначала добавьте в ESPHome,
+   Для Bluetooth выберите обнаруженный GTag; Wi-Fi-плату сначала добавьте в ESPHome,
    затем в GTag Display.
 5. **Выберите содержимое.** Откройте настройки GTag Display, выберите макет
    и сущности, проверьте предпросмотр и нажмите «Применить».

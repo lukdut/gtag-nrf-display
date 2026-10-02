@@ -5,7 +5,7 @@
 интеграции GTag Display. Связь использует штатный API ESPHome; MQTT и
 Bluetooth не требуются. Первая установка — через USB, следующие — через OTA.
 
-**Статус:** стабильный профиль в **1.2.0**. Установите интеграцию через HACS
+**Статус:** стабильный профиль в **1.3.0**. Установите интеграцию через HACS
 и перезапустите HA. На физической Super Mini подтверждены подключение Wi-Fi,
 погодный макет из HA, обновление по OTA и восстановление обновлений после
 перезапуска или потери Wi-Fi. Для проверенного экземпляра потребовались
@@ -52,7 +52,7 @@ substitutions:
   gtag_friendly_name: Экран кухни
 
 packages:
-  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/wifi.yaml@v1.2.0
+  gtag: github://lukdut/gtag-nrf-display/config/esphome/packages/wifi.yaml@v1.3.0
 
 wifi:
   ssid: !secret wifi_ssid
@@ -92,7 +92,7 @@ gtag_display:
 esphome compile config/esphome/esp32-gtag-display.yaml
 ```
 
-Также в [релизе](https://github.com/lukdut/gtag-nrf-display/releases/tag/v1.2.0)
+Также в [релизе](https://github.com/lukdut/gtag-nrf-display/releases/tag/v1.3.0)
 есть автономный архив `gtag-esp32-c3-wifi-esphome.zip` с исходниками и пустым
 `secrets.example.yaml`. Готового BIN для ESP32 нет: сборка содержит ваши
 данные Wi-Fi, ключ API, пароль OTA, GPIO и дополнительные компоненты.
@@ -124,7 +124,7 @@ ESPHome. Разрешение устройству выполнять дейст
 прошивка собирается с GPIO и дополнительными компонентами этого устройства.
 Обновление интеграции через HACS и прошивки через ESPHome — отдельные операции.
 
-При обновлении с предыдущей версии замените в своём YAML тег пакета на `v1.2.0`
+При обновлении с предыдущей версии замените в своём YAML тег пакета на `v1.3.0`
 и выполните OTA. Сохраните имя устройства, GPIO, ключ API, пароль OTA и
 включённые параметры обхода `Auth Expired`: заново создавать YAML не требуется.
 Прошивка beta.2 также совместима с интеграцией 1.1.0, поэтому одновременное

@@ -193,21 +193,23 @@ async def test_display_preview_and_check_without_ble(hass, device, monkeypatch):
         await display.async_close()
 
 
-async def test_wifi_wizard(hass, hass_client_no_auth):
+@pytest.mark.parametrize("board,package,pin", [("esp32c3_supermini", "wifi", "GPIO0"),
+                                              ("d1_mini", "esp8266-wifi", "GPIO4")])
+async def test_wifi_wizard(hass, hass_client_no_auth, board, package, pin):
     from custom_components.gtag_ble_test.firmware_config import hardware_defaults, WIFI_FIRMWARE_TAG
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "firmware"})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {
-        "board": "esp32c3_supermini", "transport": "wifi", "name": "gtag-kitchen", "friendly_name": "Kitchen",
+        "board": board, "transport": "wifi", "name": "gtag-kitchen", "friendly_name": "Kitchen",
     })
     assert result["step_id"] == "firmware_pins"
-    pins = {k: v for k, v in hardware_defaults("esp32c3_supermini").items() if k.endswith('_pin') and k != 'battery_pin'}
+    pins = {k: v for k, v in hardware_defaults(board).items() if k.endswith('_pin') and k != 'battery_pin'}
     result = await hass.config_entries.flow.async_configure(result["flow_id"], pins)
     assert result["step_id"] == "firmware_wifi"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"wifi_ssid": "Test network", "wifi_password": "test-password"})
     assert result["step_id"] == "firmware_download" and not result["errors"]
     text = result["description_placeholders"]["yaml"]
-    assert f"wifi.yaml@{WIFI_FIRMWARE_TAG}" in text and "GPIO0" in text
+    assert f"/{package}.yaml@{WIFI_FIRMWARE_TAG}" in text and pin in text
     assert "encryption:" in text and "test-password" in text
     assert "nrf52:" not in text
     client = await hass_client_no_auth()

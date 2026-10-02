@@ -17,7 +17,7 @@ class GTagEntity(Entity):
             identifiers={(DOMAIN, display.identity)},
             connections=({(CONNECTION_BLUETOOTH, display.address)} if display.transport == TRANSPORT_BLE else
                          {(CONNECTION_NETWORK_MAC, display.address)} if display.transport == TRANSPORT_WIFI else set()),
-            manufacturer="DIY", model="ESP32 G-Tag Display" if display.transport == TRANSPORT_WIFI else "nRF52840 G-Tag Display", name=display.name,
+            manufacturer="DIY", model="Wi-Fi G-Tag Display" if display.transport == TRANSPORT_WIFI else "nRF52840 G-Tag Display", name=display.name,
         )
 
     async def async_added_to_hass(self) -> None:

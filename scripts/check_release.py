@@ -29,8 +29,8 @@ def main() -> None:
         raise SystemExit(f"Stable release cannot ship prerelease firmware {', '.join(firmwares)}")
     if not (ROOT / f"docs/releases/{version}.md").is_file():
         raise SystemExit(f"Missing release notes for {version}")
-    for profile in ("ble", "zigbee", "wifi"):
-        public_name = "gtag-esp32-c3-wifi" if profile == "wifi" else f"gtag-{profile}"
+    for profile in ("ble", "zigbee", "wifi", "esp8266-wifi"):
+        public_name = {"wifi": "gtag-esp32-c3-wifi", "esp8266-wifi": "gtag-d1-mini-wifi"}.get(profile, f"gtag-{profile}")
         public = ROOT / f"config/esphome/{public_name}.yaml"
         package = ROOT / f"config/esphome/packages/{profile}.yaml"
         if f"packages/{profile}.yaml@{tag}" not in public.read_text():

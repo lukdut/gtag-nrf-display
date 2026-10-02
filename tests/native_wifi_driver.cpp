@@ -1,18 +1,26 @@
 #include "native_wifi_stubs.h"
 #include <memory>
-#include "gtag_display_esp32.cpp"
+#include "gtag_display_wifi.cpp"
 using esphome::gtag_display::GTagDisplay;
 std::unique_ptr<GTagDisplay> lcd;
 std::array<esphome::GPIOPin, 4> pins{{esphome::GPIOPin(0), esphome::GPIOPin(1), esphome::GPIOPin(2), esphome::GPIOPin(3)}};
 extern "C" {
-void wifi_decoder(wifi_sim::Decode decode) { wifi_sim::decode = decode; }
+unsigned wifi_component_size() { return sizeof(GTagDisplay); }
+unsigned wifi_flash_reads() { return wifi_sim::flash_reads; }
+unsigned wifi_yields() { return wifi_sim::yields; }
 void wifi_create() {
   wifi_sim::now_us = 0; wifi_sim::words.clear();
   std::fill(std::begin(wifi_sim::levels), std::end(wifi_sim::levels), false);
   wifi_sim::bits = 0;
+  wifi_sim::flash_reads = wifi_sim::yields = 0;
   lcd = std::make_unique<GTagDisplay>();
   lcd->set_dio_pin(&pins[0]); lcd->set_clk_pin(&pins[1]); lcd->set_cs_pin(&pins[2]); lcd->set_reset_pin(&pins[3]);
   lcd->set_boot_pattern(esphome::gtag_display::BootPattern::NONE);
+  lcd->setup();
+}
+void wifi_logo() {
+  wifi_create();
+  lcd->set_boot_pattern(esphome::gtag_display::BootPattern::LOGO);
   lcd->setup();
 }
 unsigned wifi_run(unsigned ticks) {

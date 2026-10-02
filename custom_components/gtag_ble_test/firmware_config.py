@@ -11,9 +11,9 @@ import re
 from typing import Any
 
 # Pin each transport to its tested package revision.
-FIRMWARE_TAG = "v1.2.0"
-ZIGBEE_FIRMWARE_TAG = "v1.2.0"
-WIFI_FIRMWARE_TAG = "v1.2.0"
+FIRMWARE_TAG = "v1.3.0"
+ZIGBEE_FIRMWARE_TAG = "v1.3.0"
+WIFI_FIRMWARE_TAG = "v1.3.0"
 PACKAGE_ROOT = "github://lukdut/gtag-nrf-display/config/esphome/packages"
 LCD_PINS = ("dio_pin", "clk_pin", "cs_pin", "reset_pin")
 RESERVED_GPIO = {0, 1, 9, 10, 18}
@@ -22,6 +22,18 @@ BOARDS = {
     "esp32c3_supermini": {
         "pins": ("GPIO0", "GPIO1", "GPIO3", "GPIO4"),
         "battery_enabled": False,
+        "wifi_package": "wifi",
+        "label": "ESP32-C3 Super Mini",
+        "gpio": (0, 1, 3, 4, 5, 6, 7, 10, 20, 21),
+        "gpio_error": "invalid_esp32_gpio",
+    },
+    "d1_mini": {
+        "pins": ("GPIO4", "GPIO5", "GPIO12", "GPIO14"),
+        "battery_enabled": False,
+        "wifi_package": "esp8266-wifi",
+        "label": "D1 mini (ESP8266)",
+        "gpio": (4, 5, 12, 13, 14, 16),
+        "gpio_error": "invalid_esp8266_gpio",
     },
     "promicro": {
         "bootloader": "adafruit_nrf52_sd140_v6",
@@ -63,7 +75,7 @@ def validate_device(settings: dict) -> dict:
         errors["transport"] = "invalid_transport"
     elif result.get("board") == "super52840" and result["transport"] != "zigbee":
         errors["transport"] = "unsupported_profile"
-    elif (result.get("board") == "esp32c3_supermini") != (result["transport"] == "wifi"):
+    elif ("wifi_package" in BOARDS.get(result.get("board"), {})) != (result["transport"] == "wifi"):
         errors["transport"] = "unsupported_profile"
     name = result.get("name", "")
     if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?", name):
@@ -97,7 +109,8 @@ def validate_pins(settings: dict, *, battery: bool = False) -> dict:
     if not isinstance(result.get("battery_enabled"), bool):
         errors["battery_enabled"] = "invalid_settings"
     used = set()
-    wifi = result.get("board") == "esp32c3_supermini"
+    board = BOARDS.get(result.get("board"), {})
+    wifi = "wifi_package" in board
     if wifi and result.get("battery_enabled"):
         errors["battery_enabled"] = "usb_power_only"
     fields = (*LCD_PINS, "battery_pin") if battery and result.get("battery_enabled") else LCD_PINS
@@ -105,8 +118,8 @@ def validate_pins(settings: dict, *, battery: bool = False) -> dict:
         try:
             if wifi:
                 match = re.fullmatch(r"GPIO(\d{1,2})", str(result.get(field, "")).strip().upper())
-                if match is None or int(match[1]) not in (0, 1, 3, 4, 5, 6, 7, 10, 20, 21):
-                    raise ValueError("invalid_esp32_gpio")
+                if match is None or int(match[1]) not in board["gpio"]:
+                    raise ValueError(board["gpio_error"])
                 number = int(match[1])
             else:
                 number = gpio_number(result.get(field))
@@ -155,18 +168,19 @@ def render_firmware_yaml(settings: dict) -> str:
     quote = lambda value: json.dumps(value, ensure_ascii=False)
     if settings["transport"] == "wifi":
         settings = validate_wifi(settings)
+        board = BOARDS[settings["board"]]
         return "\n".join([
-            "# GTag Display / ESP32-C3 Super Mini — ESPHome 2026.9.0, USB power.",
+            f"# GTag Display / {board['label']} — ESPHome 2026.9.0, USB power.",
             "# Private configuration: contains Wi-Fi, API and OTA credentials.",
             "# Keep the original DisplayCLK/S1 clock and common ground connected.",
             "substitutions:", f"  gtag_name: {quote(settings['name'])}",
             f"  gtag_friendly_name: {quote(settings['friendly_name'])}", "", "packages:",
-            f"  gtag: {PACKAGE_ROOT}/wifi.yaml@{WIFI_FIRMWARE_TAG}", "", "wifi:",
+            f"  gtag: {PACKAGE_ROOT}/{board['wifi_package']}.yaml@{WIFI_FIRMWARE_TAG}", "", "wifi:",
             f"  ssid: {quote(settings['wifi_ssid'])}", f"  password: {quote(settings['wifi_password'])}",
-            '  # If Wi-Fi fails with "Auth Expired", uncomment both options below,',
+            *(['  # If Wi-Fi fails with "Auth Expired", uncomment both options below,',
             "  # rebuild and flash via USB. Lower TX power may reduce range.",
             "  # power_save_mode: none",
-            "  # output_power: 8.5dB",
+            "  # output_power: 8.5dB"] if settings["board"] == "esp32c3_supermini" else []),
             "", "api:", "  encryption:", f"    key: {quote(settings['api_key'])}", "", "ota:",
             "  - platform: esphome", f"    password: {quote(settings['ota_password'])}", "", "gtag_display:",
             *[f"  {field}: {settings[field]}" for field in LCD_PINS],

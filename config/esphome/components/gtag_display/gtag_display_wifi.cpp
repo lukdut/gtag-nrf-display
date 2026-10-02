@@ -1,17 +1,45 @@
 #include "esphome/core/defines.h"
-#ifdef USE_ESP32
-#include "gtag_display_esp32.h"
+#if defined(USE_ESP32) || defined(USE_ESP8266)
+#include "gtag_display_wifi.h"
 #include "boot_logo.h"
 #include "firmware_info.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
-#include <mbedtls/base64.h>
 #include <algorithm>
+#include <memory>
+#include <new>
 
 namespace esphome::gtag_display {
 namespace {
 constexpr size_t SLICE = 64;
 constexpr const char *TAG = "gtag_display";
+int base64_digit(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  return c == '+' ? 62 : c == '/' ? 63 : -1;
+}
+
+// Strict, bounded decoding into caller-owned RAM. No platform TLS dependency
+// or temporary copy of the full Base64 string (5464 bytes for a RAW frame).
+bool decode_base64(const std::string &in, uint8_t *out, size_t size) {
+  size_t written = 0;
+  for (size_t i = 0; i < in.size(); i += 4) {
+    const bool last = i + 4 == in.size();
+    const int a = base64_digit(in[i]), b = base64_digit(in[i + 1]);
+    const int c = in[i + 2] == '=' && last ? 0 : base64_digit(in[i + 2]);
+    const int d = in[i + 3] == '=' && last ? 0 : base64_digit(in[i + 3]);
+    if (a < 0 || b < 0 || c < 0 || d < 0) return false;
+    const size_t count = in[i + 2] == '=' ? 1 : in[i + 3] == '=' ? 2 : 3;
+    if ((count == 1 && (in[i + 3] != '=' || (b & 15))) || (count == 2 && (c & 3)) ||
+        count > size - written) return false;
+    out[written++] = (a << 2) | (b >> 4);
+    if (count > 1) out[written++] = (b << 4) | (c >> 2);
+    if (count > 2) out[written++] = (c << 6) | d;
+  }
+  return written == size;
+}
+
 bool hex32(const std::string &text, uint32_t &value) {
   if (text.size() != 8) return false;
   value = 0;
@@ -33,7 +61,8 @@ void GTagDisplay::setup() {
   delay_microseconds_safe(50);
   pins_[3]->digital_write(true);
   display_frame_.fill(0xFF);
-  if (boot_pattern_ == BootPattern::LOGO) display_frame_ = boot_logo::FRAME;
+  if (boot_pattern_ == BootPattern::LOGO)
+    flash_storage::copy(display_frame_.data(), boot_logo::FRAME.data(), display_frame_.size());
   else if (boot_pattern_ == BootPattern::BLACK) display_frame_.fill(0);
   else if (boot_pattern_ == BootPattern::CHECKERBOARD || boot_pattern_ == BootPattern::STRIPES) {
     for (size_t i = 0; i < display_frame_.size(); ++i)
@@ -130,13 +159,22 @@ bool GTagDisplay::submit(const std::string &payload, int version, int codec, con
     return reject_("unsupported_codec");
   if (payload.empty() || payload.size() > ((frame::MAX_ENCODED_SIZE + 2) / 3) * 4)
     return reject_("invalid_frame_size");
-  size_t size = 0;
-  if (mbedtls_base64_decode(encoded_frame_.data(), encoded_frame_.size(), &size,
-      reinterpret_cast<const unsigned char *>(payload.data()), payload.size()) != 0 || !size)
-    return reject_("invalid_base64");
-  const auto decoded = frame::decode_frame(static_cast<frame::Codec>(codec), encoded_frame_.data(), size,
-                                           decoded_frame_.data(), decoded_frame_.size());
-  if (!decoded.ok) return reject_("decode_error");
+  if (payload.size() % 4) return reject_("invalid_base64");
+  const size_t size = payload.size() / 4 * 3 - (payload.back() == '=') - (payload[payload.size() - 2] == '=');
+  if (size > frame::MAX_ENCODED_SIZE) return reject_("invalid_frame_size");
+  if (codec == static_cast<int>(frame::Codec::RAW)) {
+    if (size != decoded_frame_.size()) return reject_("decode_error");
+    if (!decode_base64(payload, decoded_frame_.data(), size)) return reject_("invalid_base64");
+  } else {
+    // Only compressed packets need a temporary input buffer. Typical template
+    // packets are tens of bytes; RAW needs only the two 4 KiB frame buffers.
+    std::unique_ptr<uint8_t[]> encoded(new (std::nothrow) uint8_t[size]);
+    if (!encoded) return reject_("out_of_memory");
+    if (!decode_base64(payload, encoded.get(), size)) return reject_("invalid_base64");
+    const auto decoded = frame::decode_frame(static_cast<frame::Codec>(codec), encoded.get(), size,
+                                             decoded_frame_.data(), decoded_frame_.size());
+    if (!decoded.ok) return reject_("decode_error");
+  }
   if (frame::crc32(decoded_frame_.data(), decoded_frame_.size()) != checksum) return reject_("crc_mismatch");
   // Only a fully validated image can replace the last displayed frame.
   display_frame_ = decoded_frame_;
@@ -161,15 +199,15 @@ bool GTagDisplay::confirm(const std::string &id, const std::string &crc, const s
 std::string GTagDisplay::info_hex() const {
   uint8_t bytes[firmware_info::SIZE];
   firmware_info::make(bytes);
-  constexpr char HEX[] = "0123456789abcdef";
+  constexpr char HEX_DIGITS[] = "0123456789abcdef";
   std::string out;
   out.reserve(sizeof(bytes) * 2);
-  for (auto byte : bytes) { out += HEX[byte >> 4]; out += HEX[byte & 15]; }
+  for (auto byte : bytes) { out += HEX_DIGITS[byte >> 4]; out += HEX_DIGITS[byte & 15]; }
   return out;
 }
 
 void GTagDisplay::dump_config() {
-  ESP_LOGCONFIG(TAG, "GTag 256x128, ESP32 Wi-Fi / native API, USB power");
+  ESP_LOGCONFIG(TAG, "GTag 256x128, Wi-Fi / native API, USB power");
   LOG_PIN("  DIO: ", pins_[0]); LOG_PIN("  CLK: ", pins_[1]);
   LOG_PIN("  CS: ", pins_[2]); LOG_PIN("  RESET: ", pins_[3]);
 }

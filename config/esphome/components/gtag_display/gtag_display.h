@@ -1,8 +1,8 @@
 #pragma once
 
 #include "esphome/core/defines.h"
-#ifdef USE_ESP32
-#include "gtag_display_esp32.h"
+#if defined(USE_ESP32) || defined(USE_ESP8266)
+#include "gtag_display_wifi.h"
 #else
 
 #include <array>
