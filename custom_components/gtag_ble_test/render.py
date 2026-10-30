@@ -1,7 +1,4 @@
-"""Deterministic 256x128 drawing and native row-lsb framebuffer packing.
-
-Call rendering functions in an executor: font I/O and Pillow are synchronous.
-"""
+"""Deterministic 256x128 drawing and native row-lsb framebuffer packing."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,9 +10,18 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 import voluptuous as vol
 from homeassistant.helpers import config_validation as cv
+from homeassistant.core import HomeAssistant
+
+from .const import DOMAIN
 
 WIDTH, HEIGHT = 256, 128
-FONT_PATH = Path(__file__).with_name("fonts") / "DejaVuSans.ttf"
+FONT_DIR = Path(__file__).with_name("fonts")
+DEFAULT_FONT = "DejaVuSans.ttf"
+
+def get_available_fonts(hass: HomeAssistant) -> list[str]:
+    """Возвращает список шрифтов из памяти (загружается в __init__.py)."""
+    return hass.data.get(DOMAIN, {}).get("fonts", [DEFAULT_FONT])
+
 BIT_REVERSE = bytes(int(f"{value:08b}"[::-1], 2) for value in range(256))
 ICONS = ("clock", "calendar", "thermometer", "humidity", "home", "sunny", "clear-night",
          "cloudy", "partlycloudy", "rainy", "pouring", "snowy", "snowy-rainy", "hail",
@@ -30,21 +36,19 @@ BASE = {
     vol.Optional("color", default="black"): COLOR,
 }
 
-
 def _rectangle_bounds(item: dict[str, Any]) -> dict[str, Any]:
     if item["x2"] < item["x"] or item["y2"] < item["y"]:
         raise vol.Invalid("Rectangle x2/y2 must be at or after x/y")
     return item
 
-
 TEXT_SCHEMA = vol.Schema({
     **BASE,
     vol.Required("type"): "text",
-    # HA action templates can yield native numbers, e.g. states('sensor.x').
     vol.Required("text"): vol.All(vol.Any(str, int, float), vol.Coerce(str), vol.Length(max=1024)),
     vol.Optional("size", default=20): vol.All(int, vol.Range(min=8, max=64)),
     vol.Optional("align", default="left"): vol.In(("left", "center", "right")),
     vol.Optional("max_width"): vol.All(int, vol.Range(min=1, max=WIDTH)),
+    vol.Optional("font", default=DEFAULT_FONT): str,
 })
 LINE_SCHEMA = vol.Schema({
     **BASE,
@@ -71,6 +75,7 @@ WEATHER_SCHEMA = vol.Schema({
     vol.Required("type"): "weather",
     vol.Required("entity_id"): cv.entity_domain("weather"),
     vol.Optional("label", default=""): vol.All(str, vol.Length(max=80)),
+    vol.Optional("font", default=DEFAULT_FONT): str,
 })
 HISTORY_SCHEMA = vol.Schema({
     vol.Required("type"): "history_graph",
@@ -79,15 +84,14 @@ HISTORY_SCHEMA = vol.Schema({
     vol.Optional("label", default=""): vol.All(str, vol.Length(max=80)),
     vol.Optional("unit", default=""): vol.All(str, vol.Length(max=16)),
     vol.Optional("decimals", default="original"): vol.In(("original", "0", "1", "2", "3", "4", "5", "6")),
+    vol.Optional("font", default=DEFAULT_FONT): str,
 })
 DYNAMIC_TYPES = ("weather", "history_graph")
-
 
 def _full_screen_widgets(elements):
     if len(elements) > 1 and any(item["type"] in DYNAMIC_TYPES for item in elements):
         raise vol.Invalid("Weather and history widgets occupy the entire screen")
     return elements
-
 
 LAYOUT_SCHEMA = vol.Schema({
     vol.Optional("background", default="white"): COLOR,
@@ -98,19 +102,16 @@ LAYOUT_SCHEMA = vol.Schema({
     ),
 })
 
-
 @dataclass(frozen=True)
 class RenderedFrame:
     raw: bytes
     png: bytes
     template_payload: bytes | None = field(default=None, compare=False)
 
-
 def _png(image: Image.Image) -> bytes:
     output = BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
-
 
 def from_raw(raw: bytes) -> RenderedFrame:
     if len(raw) != WIDTH * HEIGHT // 8:
@@ -118,15 +119,7 @@ def from_raw(raw: bytes) -> RenderedFrame:
     image = Image.frombytes("1", (WIDTH, HEIGHT), raw.translate(BIT_REVERSE))
     return RenderedFrame(raw, _png(image))
 
-
 def preview_svg(raw: bytes) -> str:
-    """A pixel-exact inline preview for HA's SVG-enabled options dialog.
-
-    HA's Markdown filter allows svg width/height and path d/stroke, but strips
-    rect, fill, viewBox and styles. Draw one-pixel strokes at pixel centres,
-    including an opaque white background, using explicit native dimensions.
-    The output contains only pixels, never user text or external resources.
-    """
     if len(raw) != WIDTH * HEIGHT // 8:
         raise ValueError("A framebuffer must contain exactly 4096 bytes")
     paths = []
@@ -144,7 +137,6 @@ def preview_svg(raw: bytes) -> str:
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}">'
             '<path stroke="white" d="' + background + '"/>'
             '<path stroke="black" d="' + "".join(paths) + '"/></svg>')
-
 
 def _icon(draw: ImageDraw.ImageDraw, item: dict[str, Any], color: int) -> None:
     x, y, size = item["x"], item["y"], item["size"]
@@ -183,7 +175,6 @@ def _icon(draw: ImageDraw.ImageDraw, item: dict[str, Any], color: int) -> None:
         from .widget_render import weather_icon
         weather_icon(draw, name, points, color, width)
 
-
 def render_layout(layout: dict[str, Any], dynamic_data: dict | None = None) -> RenderedFrame:
     layout = LAYOUT_SCHEMA(layout)
     image = Image.new("1", (WIDTH, HEIGHT), int(layout["background"] == "white"))
@@ -200,12 +191,18 @@ def render_layout(layout: dict[str, Any], dynamic_data: dict | None = None) -> R
         kind = item["type"]
         if kind == "text":
             size = item["size"]
+            font_name = item.get("font", DEFAULT_FONT)
+            font_path = FONT_DIR / font_name
+            if not font_path.exists():
+                font_path = FONT_DIR / DEFAULT_FONT
+
             lines = item["text"].split("\n")
             limit = item.get("max_width")
             while True:
-                if size not in fonts:
-                    fonts[size] = ImageFont.truetype(str(FONT_PATH), size=size)
-                font = fonts[size]
+                font_key = (str(font_path), size)
+                if font_key not in fonts:
+                    fonts[font_key] = ImageFont.truetype(str(font_path), size=size)
+                font = fonts[font_key]
                 if limit is None or size <= 8 or all(font.getlength(line) <= limit for line in lines):
                     break
                 size -= 1
@@ -230,18 +227,17 @@ def render_layout(layout: dict[str, Any], dynamic_data: dict | None = None) -> R
     from .template_codec import candidate_for_layout
     return RenderedFrame(raw, _png(image), candidate_for_layout(layout, raw))
 
-
-def clock_layout(now: datetime) -> dict[str, Any]:
+def clock_layout(now: datetime, font_time: str = DEFAULT_FONT, font_date: str = DEFAULT_FONT) -> dict[str, Any]:
     weekday = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")[now.weekday()]
     return {
         "elements": [
             {"type": "icon", "name": "clock", "x": 8, "y": 8, "size": 20},
-            {"type": "text", "x": 36, "y": 10, "text": "СЕЙЧАС", "size": 16},
-            {"type": "text", "x": 248, "y": 10, "text": weekday, "size": 16, "align": "right"},
+            {"type": "text", "x": 36, "y": 10, "text": "СЕЙЧАС", "size": 16, "font": font_time},
+            {"type": "text", "x": 248, "y": 10, "text": weekday, "size": 16, "align": "right", "font": font_date},
             {"type": "line", "x": 8, "y": 35, "x2": 247, "y2": 35},
             {"type": "text", "x": 128, "y": 44, "text": now.strftime("%H:%M"),
-             "size": 46, "align": "center"},
+             "size": 46, "align": "center", "font": font_time},
             {"type": "text", "x": 128, "y": 103, "text": now.strftime("%d.%m.%Y"),
-             "size": 18, "align": "center"},
+             "size": 18, "align": "center", "font": font_date},
         ],
     }

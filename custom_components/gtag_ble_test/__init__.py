@@ -1,6 +1,8 @@
 """GTag display integration for Bluetooth, Zigbee2MQTT and ESPHome Wi-Fi."""
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
@@ -12,17 +14,37 @@ import voluptuous as vol
 
 from .const import CONF_TRANSPORT, DOMAIN, TRANSPORT_ZIGBEE, TRANSPORT_WIFI
 from .display import Display
-from .render import LAYOUT_SCHEMA
+from .render import DEFAULT_FONT, FONT_DIR
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SWITCH, Platform.BUTTON, Platform.IMAGE, Platform.SENSOR, Platform.BINARY_SENSOR]
-DRAW_SCHEMA = LAYOUT_SCHEMA.extend({
+
+# Relaxed schema to allow font inside text elements
+DRAW_SCHEMA = vol.Schema({
     vol.Required("device_id"): cv.string,
+    vol.Optional("background", default="white"): cv.string,
+    vol.Required("elements"): list,
     vol.Optional("force", default=False): cv.boolean,
     vol.Optional("auto_update", default=True): cv.boolean,
 })
 
+def _scan_fonts() -> list[str]:
+    """Synchronous function to scan fonts, runs in executor."""
+    if not FONT_DIR.exists():
+        return [DEFAULT_FONT]
+    try:
+        fonts = sorted(p.name for p in FONT_DIR.glob("*.ttf"))
+        return fonts if fonts else [DEFAULT_FONT]
+    except OSError:
+        return [DEFAULT_FONT]
 
 async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
+    # Scan fonts once at startup to avoid blocking the event loop
+    fonts = await hass.async_add_executor_job(_scan_fonts)
+    hass.data.setdefault(DOMAIN, {})["fonts"] = fonts
+    _LOGGER.debug("Loaded fonts for GTag Display: %s", fonts)
+
     def selected_display(call: ServiceCall) -> Display:
         device = dr.async_get(hass).async_get(call.data["device_id"])
         if device is None:
@@ -35,11 +57,18 @@ async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
                     return display
         raise ServiceValidationError("The selected GTag display is not loaded")
 
-    async def draw(call: ServiceCall) -> dict:
-        return await selected_display(call).async_draw(
-            {"background": call.data["background"], "elements": call.data["elements"]},
-            force=call.data["force"], auto_update=call.data["auto_update"],
+    async def draw(call: ServiceCall) -> dict | None:
+        layout = {
+            "background": call.data["background"],
+            "elements": call.data["elements"]
+        }
+
+        result = await selected_display(call).async_draw(
+            layout,
+            force=call.data["force"],
+            auto_update=call.data["auto_update"],
         )
+        return result
 
     async def check_connection(call: ServiceCall) -> dict:
         return await selected_display(call).connection_check.async_run()
@@ -86,8 +115,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             try:
                 await display.async_apply_settings(settings, updated.options["screen_revision"])
             except HomeAssistantError:
-                # The controller retains the intended screen and exposes the
-                # transport error in diagnostics. Options remain saved for retry.
                 pass
 
     entry.async_on_unload(entry.add_update_listener(update_options))

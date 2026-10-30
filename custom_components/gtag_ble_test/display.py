@@ -31,8 +31,6 @@ from .transport import FrameSender, connect, get_operation_lock, renew_freshness
 _LOGGER = logging.getLogger(__name__)
 MIN_UPDATE_INTERVAL = 5.0
 COALESCE_SECONDS = 0.25
-# A rebooted peripheral cannot advertise its lost framebuffer with protocol v1.
-# Bound local duplicate suppression; Refresh and force always bypass it.
 UNCHANGED_MAX_AGE = 900.0
 
 
@@ -151,8 +149,6 @@ class Display:
                 self.last_layout = self._validate_layout(saved["layout"])
             except (vol.Invalid, HomeAssistantError, TypeError) as err:
                 _LOGGER.warning("%s: ignoring invalid saved layout: %s", self.address, err)
-        # Recover an options save even if HA stopped before its update listener
-        # could apply it. A later draw action remains active across restarts.
         if (settings := self._entry_options.get("screen")) and (
             (revision := self._entry_options.get("screen_revision")) != self._options_revision
         ):
@@ -275,8 +271,6 @@ class Display:
                     templates.append(TrackTemplate(template, None))
             elif element["type"] in DYNAMIC_TYPES:
                 entity_id = repr(element["entity_id"])
-                # Read state/attributes explicitly: printing TemplateState alone
-                # does not register its dependencies with HA's template tracker.
                 template = Template(
                     "{% set source = states[" + entity_id + "] %}"
                     "{{ (source.state, source.attributes) if source is not none else states(" + entity_id + ") }}",
@@ -285,7 +279,6 @@ class Display:
                 templates.append(TrackTemplate(template, None))
                 dynamic = True
         if dynamic:
-            # Forecast and history windows move even if the current state does not.
             templates.append(TrackTemplate(Template("{{ now().minute }}", self.hass), None))
         if templates:
             self._template_tracker = async_track_template_result(
@@ -334,7 +327,6 @@ class Display:
                 self._stop_clock()
             await self._save()
             self._notify()
-            # A failed transfer must not turn the clock off: next minute retries.
             result = self._enqueue("clock", None, True) if enabled else None
         if result is not None:
             await asyncio.shield(result)
@@ -379,8 +371,6 @@ class Display:
         if self._closed:
             raise HomeAssistantError("The display integration is unloading")
         result = self.hass.loop.create_future()
-        # Timer-initiated requests have no waiter. Consume exceptions in either
-        # case; an awaiting service caller still receives the same exception.
         result.add_done_callback(lambda done: None if done.cancelled() else done.exception())
         if self._pending is not None:
             self._resolve(self._pending, {"status": "superseded"})
@@ -407,9 +397,15 @@ class Display:
             request.result.set_result(result)
 
     async def _render(self, request: DrawRequest) -> RenderedFrame:
-        if request.mode == "raw":
+        if request.mode == "clock":
+            font_name = self._entry_options.get("screen", {}).get("font_clock", "DejaVuSans.ttf")
+            layout = clock_layout(dt_util.now(), font_time=font_name, font_date=font_name)
+        elif request.mode == "raw":
+            # If a ready-made picture arrives (4096 bytes), just convert it
             return await self.hass.async_add_executor_job(from_raw, request.content)
-        layout = clock_layout(dt_util.now()) if request.mode == "clock" else deepcopy(request.content)
+        else:
+            layout = deepcopy(request.content)
+
         return await async_render_layout(self.hass, layout)
 
     async def _run_queue(self) -> None:
@@ -426,7 +422,7 @@ class Display:
                     except TimeoutError:
                         pass
                     else:
-                        continue  # Recalculate after newer content or interval settings.
+                        continue
                 else:
                     await asyncio.sleep(0)
                 request, self._pending = self._pending, None
@@ -469,7 +465,6 @@ class Display:
                                 if sender.report is not None and sender.report.firmware_info is not None:
                                     self.firmware_info = sender.report.firmware_info.attributes()
                         report_attributes = {"transport": TRANSPORT_BLE, **report.attributes()}
-                    # Update preview only after the transport confirms this frame.
                     self.preview = frame.png
                     self._last_frame = frame.raw
                     self.last_success = dt_util.utcnow()
@@ -521,7 +516,5 @@ class Display:
             with suppress(asyncio.CancelledError):
                 await self._worker
         if self.last_success is not None:
-            # Flush/cancel the delayed write before a new Display instance loads
-            # the same store. An old timer must never overwrite new settings.
             await self._store.async_save({**self._saved_data(), "clock_enabled": saved_clock_enabled})
         self._listeners.clear()

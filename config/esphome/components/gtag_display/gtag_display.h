@@ -18,6 +18,14 @@
 #if defined(USE_GTAG_ZIGBEE) && defined(USE_SENSOR)
 #include "esphome/components/sensor/sensor.h"
 #endif
+#ifdef USE_GTAG_BUTTON
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#endif
+#ifndef USE_GTAG_ZIGBEE
+// Needed for bt_conn and GATT declarations below.
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/gatt.h>
+#endif
 #ifdef USE_GTAG_BATTERY
 #include "battery_bar.h"
 #include "battery_guard.h"
@@ -37,9 +45,23 @@ class GTagDisplay : public Component {
   void set_clk_pin(uint8_t pin) { lcd_pins_[1] = pin; }
   void set_cs_pin(uint8_t pin) { lcd_pins_[2] = pin; }
   void set_reset_pin(uint8_t pin) { lcd_pins_[3] = pin; }
+#ifdef USE_GTAG_BUTTON
+  void set_button_pin(uint8_t pin) { button_pin_ = pin; }
+  void set_button_sensor(binary_sensor::BinarySensor *sensor) { button_sensor_ = sensor; }
+  bool button_state() const { return this->button_debounced_; }
+#endif
   void setup() override;
   void loop() override;
   void dump_config() override;
+
+  // BLE static callbacks. Public because Zephyr's BT_GATT_SERVICE_DEFINE and
+  // bt_conn_cb registration take their address from file scope (outside the
+  // class). They are members, so they can access protected/private state.
+#ifndef USE_GTAG_ZIGBEE
+  static void button_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value);
+  static void connected_cb(struct bt_conn *conn, uint8_t err);
+  static void disconnected_cb(struct bt_conn *conn, uint8_t reason);
+#endif
 
   bool radio_ready() const {
 #ifdef USE_GTAG_BATTERY
@@ -116,6 +138,24 @@ class GTagDisplay : public Component {
   void wait_(Stage next, uint32_t delay_ms);
   void service_lcd_();
   void service_freshness_();
+
+#ifdef USE_GTAG_BUTTON
+  void poll_button_();
+#ifndef USE_GTAG_ZIGBEE
+  void notify_button_();
+#endif
+  uint8_t button_pin_{17};  // P0.17
+  binary_sensor::BinarySensor *button_sensor_{nullptr};
+  bool button_last_raw_{false};      // raw reading: false = released (pull-up high)
+  bool button_debounced_{false};     // published state: true = pressed
+  uint32_t button_last_change_ms_{0};
+#ifndef USE_GTAG_ZIGBEE
+  // Active connection retained by the GATT callbacks; only used to send
+  // optional button notifications after the client enables CCC.
+  struct bt_conn *button_conn_{nullptr};
+  bool button_notify_enabled_{false};
+#endif
+#endif
 
 #ifdef USE_GTAG_BATTERY
   bool battery_protection_{true};

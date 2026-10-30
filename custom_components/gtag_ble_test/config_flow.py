@@ -27,7 +27,7 @@ from .layouts import (
     async_render_layout, is_text_value, normalize_saved_timing, preset_layout,
     validate_settings, validate_timing, value_count,
 )
-from .render import clock_layout, preview_svg
+from .render import clock_layout, preview_svg, get_available_fonts, DEFAULT_FONT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,22 +46,15 @@ class GTagBLETestConfigFlow(FirmwareWizardMixin, ConfigFlow, domain=DOMAIN):
         self._zigbee_devices: dict[str, dict] = {}
         self._base_topic = "zigbee2mqtt"
 
-    async def async_step_bluetooth(
-        self, discovery_info: BluetoothServiceInfoBleak
-    ) -> ConfigFlowResult:
-        await self.async_set_unique_id(discovery_info.address)
-        self._abort_if_unique_id_configured()
-
-        self._info = discovery_info
-        self.context["title_placeholders"] = {
-            "name": discovery_info.name or discovery_info.address
-        }
-        return await self.async_step_confirm()
-
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         assert self._info is not None
+
+        # --- ДОБАВИТЬ ЭТИ ДВЕ СТРОКИ ---
+        await self.async_set_unique_id(self._info.address)
+        self._abort_if_unique_id_configured()
+        # --------------------------------
 
         if user_input is not None:
             return self.async_create_entry(
@@ -73,6 +66,8 @@ class GTagBLETestConfigFlow(FirmwareWizardMixin, ConfigFlow, domain=DOMAIN):
             step_id="confirm",
             data_schema=vol.Schema({}),
         )
+
+
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -211,52 +206,75 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
         self._settings: dict[str, Any] | None = None
         self._preview = ""
 
+    def _font_selector(self):
+        fonts = get_available_fonts(self.hass)
+        return selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=fonts,
+                translation_key="font",
+                mode=selector.SelectSelectorMode.DROPDOWN
+            )
+        )
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="init", menu_options=["configure", "export_layout", "import_layout", "diagnostics"])
 
     async def async_step_configure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if self._settings is None:
-            self._settings = normalize_saved_timing({
-                "preset": DEFAULT_PRESET, "update_interval": DEFAULT_INTERVAL, "stale_after": 15,
-                **self.config_entry.options.get("screen", {}),
-            })
-        schema = vol.Schema({
-            vol.Required("preset", default=self._settings["preset"]): selector.SelectSelector(
-                selector.SelectSelectorConfig(options=list(PRESETS) + (["custom"] if self._settings["preset"] == "custom" else []), translation_key="preset",
-                                              mode=selector.SelectSelectorMode.DROPDOWN),
-            ),
-            vol.Required("update_interval", default=self._settings["update_interval"]): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=5, max=3600, step=1,
-                                              mode=selector.NumberSelectorMode.BOX, unit_of_measurement="s"),
-            ),
-            vol.Optional("stale_after", default=self._settings["stale_after"]): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=0, max=1440, step=1,
-                                              mode=selector.NumberSelectorMode.BOX, unit_of_measurement="min"),
-            ),
-        })
         errors = {}
         placeholders = {}
-        if user_input is not None:
-            try:
-                self._settings.update(schema(user_input))
-                self._settings["update_interval"] = int(self._settings["update_interval"])
-                self._settings["stale_after"] = int(self._settings["stale_after"])
-                validate_timing(self._settings)
-            except StaleAfterTooShort as err:
-                errors["stale_after"] = "stale_after_too_short"
-                placeholders["minimum"] = str(err.minimum)
-            except vol.Invalid:
-                errors["base"] = "invalid_settings"
-            else:
-                if self._settings["preset"] == "three_values":
-                    return await self.async_step_value_sources()
-                if value_count(self._settings["preset"]):
-                    return await self.async_step_values()
-                return await self.async_step_preview()
-        return self.async_show_form(
-            step_id="configure", data_schema=self.add_suggested_values_to_schema(schema, self._settings),
-            errors=errors, description_placeholders=placeholders, last_step=False,
-        )
+        try:
+            if self._settings is None:
+                self._settings = normalize_saved_timing({
+                    "preset": DEFAULT_PRESET, "update_interval": DEFAULT_INTERVAL, "stale_after": 15,
+                    **self.config_entry.options.get("screen", {}),
+                })
+
+            schema_dict = {
+                vol.Required("preset", default=self._settings["preset"]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=list(PRESETS) + (["custom"] if self._settings["preset"] == "custom" else []), translation_key="preset",
+                                                  mode=selector.SelectSelectorMode.DROPDOWN),
+                ),
+                vol.Required("update_interval", default=self._settings["update_interval"]): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=5, max=3600, step=1,
+                                                  mode=selector.NumberSelectorMode.BOX, unit_of_measurement="s"),
+                ),
+                vol.Optional("stale_after", default=self._settings["stale_after"]): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=1440, step=1,
+                                                  mode=selector.NumberSelectorMode.BOX, unit_of_measurement="min"),
+                ),
+            }
+
+            preset = self._settings["preset"]
+            if preset in ("clock", "clock_two_values"):
+                schema_dict[vol.Optional("font_clock", default=self._settings.get("font_clock", DEFAULT_FONT))] = self._font_selector()
+
+            schema = vol.Schema(schema_dict)
+
+            if user_input is not None:
+                try:
+                    self._settings.update(schema(user_input))
+                    self._settings["update_interval"] = int(self._settings["update_interval"])
+                    self._settings["stale_after"] = int(self._settings["stale_after"])
+                    validate_timing(self._settings)
+                except StaleAfterTooShort as err:
+                    errors["stale_after"] = "stale_after_too_short"
+                    placeholders["minimum"] = str(err.minimum)
+                except vol.Invalid as err:
+                    errors["base"] = f"Invalid data: {err}"
+                else:
+                    if self._settings["preset"] == "three_values":
+                        return await self.async_step_value_sources()
+                    if value_count(self._settings["preset"]):
+                        return await self.async_step_values()
+                    return await self.async_step_preview()
+
+            return self.async_show_form(
+                step_id="configure", data_schema=self.add_suggested_values_to_schema(schema, self._settings),
+                errors=errors, description_placeholders=placeholders, last_step=False,
+            )
+        except Exception as err:
+            _LOGGER.exception("Error in async_step_configure")
+            return self.async_abort(reason="unknown_error", description_placeholders={"error": str(err)})
 
     async def async_step_value_sources(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         schema = vol.Schema({
@@ -286,16 +304,21 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
         graph = self._settings["preset"] == "value_graph"
         three_values = self._settings["preset"] == "three_values"
         domains = ["weather"] if weather else ["sensor", "input_number", "number"] if graph else None
+
         for index in ((3, 1, 2) if three_values else range(1, count + 1)):
             if is_text_value(self._settings, index):
                 if index != 3:
                     fields[vol.Optional(f"label_{index}")] = selector.TextSelector()
                 fields[vol.Required(f"text_{index}")] = selector.TextSelector()
+                fields[vol.Optional(f"font_{index}", default=self._settings.get(f"font_{index}", DEFAULT_FONT))] = self._font_selector()
                 continue
+
             fields[vol.Required(f"entity_{index}")] = selector.EntitySelector(
                 selector.EntitySelectorConfig(exclude_entities=excluded, **({"filter": {"domain": domains}} if domains else {})),
             )
             fields[vol.Optional(f"label_{index}")] = selector.TextSelector()
+            fields[vol.Optional(f"font_{index}", default=self._settings.get(f"font_{index}", DEFAULT_FONT))] = self._font_selector()
+
             if weather:
                 continue
             fields[vol.Optional(f"unit_{index}")] = selector.TextSelector()
@@ -315,12 +338,14 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
                 if is_text_value(candidate, index):
                     candidate[f"text_{index}"] = user_input.get(f"text_{index}", "")
                     candidate[f"label_{index}"] = user_input.get(f"label_{index}", "")
+                    candidate[f"font_{index}"] = user_input.get(f"font_{index}", DEFAULT_FONT)
                     for field in ("entity", "unit", "decimals"):
                         candidate.pop(f"{field}_{index}", None)
                     continue
                 candidate.pop(f"text_{index}", None)
                 for field in ("entity", "label", "unit"):
                     candidate[f"{field}_{index}"] = user_input.get(f"{field}_{index}", "")
+                candidate[f"font_{index}"] = user_input.get(f"font_{index}", DEFAULT_FONT)
                 candidate[f"decimals_{index}"] = user_input.get(f"decimals_{index}", "original")
                 entity_id = candidate[f"entity_{index}"]
                 if entity_id in excluded:
@@ -366,16 +391,20 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
                 return self.async_create_entry(data={
                     **self.config_entry.options,
                     "screen": validate_settings(self._settings),
-                    # Applying the same preset again must also replace a later
-                    # draw action; HA otherwise ignores identical options.
                     "screen_revision": secrets.token_hex(8),
                 })
         errors = {}
         bitmap_fallback = False
         try:
             self._settings = validate_settings(self._settings)
-            layout = (clock_layout(dt_util.now()) if self._settings["preset"] == "clock"
-                      else preset_layout(self._settings))
+
+            font_clock = self._settings.get("font_clock", DEFAULT_FONT)
+
+            if self._settings["preset"] == "clock":
+                layout = clock_layout(dt_util.now(), font_time=font_clock, font_date=font_clock)
+            else:
+                layout = preset_layout(self._settings)
+
             frame = await async_render_layout(self.hass, layout)
             self._preview = await self.hass.async_add_executor_job(preview_svg, frame.raw)
             bitmap_fallback = (self._settings["preset"] in
@@ -387,8 +416,6 @@ class GTagOptionsFlow(DiagnosticFlowMixin, LayoutTransferMixin, OptionsFlow):
             self._preview = ""
         fields = {}
         if bitmap_fallback:
-            # Read-only selector labels use the HA user's language, unlike
-            # backend-generated prose. This notice never blocks Apply.
             fields[vol.Optional("render_notice", default="bitmap_fallback")] = selector.SelectSelector(
                 selector.SelectSelectorConfig(options=["bitmap_fallback"], translation_key="render_notice",
                                               mode=selector.SelectSelectorMode.DROPDOWN, read_only=True))

@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.template import Template
 
-from .render import DYNAMIC_TYPES, LAYOUT_SCHEMA, RenderedFrame, render_layout
+from .render import DYNAMIC_TYPES, LAYOUT_SCHEMA, RenderedFrame, render_layout, DEFAULT_FONT
 
 PRESETS = ("clock", "single_value", "clock_two_values", "three_values", "weather", "value_graph")
 DEFAULT_PRESET = "clock_two_values"
@@ -26,6 +26,11 @@ SETTINGS_SCHEMA = vol.Schema({
     vol.Optional("update_interval", default=DEFAULT_INTERVAL): vol.All(vol.Coerce(int), vol.Range(min=5, max=3600)),
     vol.Optional("stale_after", default=15): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
     vol.Optional("history_hours", default=24): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
+    # Индивидуальные шрифты для полей
+    vol.Optional("font_clock", default=DEFAULT_FONT): str, # Для времени и даты в пресетах
+    vol.Optional("font_1", default=DEFAULT_FONT): str,
+    vol.Optional("font_2", default=DEFAULT_FONT): str,
+    vol.Optional("font_3", default=DEFAULT_FONT): str,
     **{vol.Optional(f"entity_{index}"): cv.entity_id for index in (1, 2, 3)},
     **{vol.Optional(f"label_{index}", default=""): vol.All(str, vol.Length(max=80)) for index in (1, 2, 3)},
     **{vol.Optional(f"unit_{index}", default=""): vol.All(str, vol.Length(max=16)) for index in (1, 2, 3)},
@@ -36,15 +41,12 @@ SETTINGS_SCHEMA = vol.Schema({
 
 
 class StaleAfterTooShort(vol.Invalid):
-    """The freshness lease cannot cover two configured update intervals."""
-
     def __init__(self, minimum: int) -> None:
         self.minimum = minimum
         super().__init__(f"stale_after must be 0 or at least {minimum} minutes", ["stale_after"])
 
 
 def validate_timing(settings: dict[str, Any]) -> None:
-    """Validate timing before entity selection; round seconds up to minutes."""
     minimum = (2 * int(settings.get("update_interval", DEFAULT_INTERVAL)) + 59) // 60
     stale_after = int(settings.get("stale_after", 15))
     if 0 < stale_after < minimum:
@@ -52,7 +54,6 @@ def validate_timing(settings: dict[str, Any]) -> None:
 
 
 def normalize_saved_timing(settings: dict[str, Any]) -> dict[str, Any]:
-    """Keep previously saved configurations usable with the new timing limit."""
     settings = dict(settings)
     try:
         validate_timing(settings)
@@ -112,16 +113,13 @@ def _label(settings: dict, index: int) -> str:
 
 def _value(settings: dict, index: int) -> str:
     if is_text_value(settings, index):
-        # Literal text must never be evaluated as a user-supplied Jinja template.
         return "{{ " + _quoted(settings[f"text_{index}"]) + " }}"
     entity = _quoted(settings[f"entity_{index}"])
     unit = settings.get(f"unit_{index}", "").strip()
-    # '-' is an explicit request to hide a native unit; empty means automatic.
     unit_expression = _quoted("" if unit == "-" else unit) if unit else f"(state_attr({entity}, 'unit_of_measurement') or '')"
     decimals = settings.get(f"decimals_{index}", "original")
     formatting = ""
     if decimals != "original":
-        # Round numeric states only. Adding zero avoids a displayed '-0.0'.
         formatting = (
             "{% if is_number(value) %}{% set value = " + _quoted(f"%.{decimals}f")
             + f" | format((value | float | round({decimals})) + 0.0) %}}"
@@ -139,66 +137,68 @@ def _value(settings: dict, index: int) -> str:
 
 
 def preset_layout(settings: dict[str, Any]) -> dict[str, Any]:
-    """Return a persistent template layout. No HA states are read here."""
     settings = validate_settings(settings)
     if settings["preset"] == "custom":
         return deepcopy(settings["layout"])
+
+    f_clock = settings.get("font_clock", DEFAULT_FONT)
+    f1 = settings.get("font_1", DEFAULT_FONT)
+    f2 = settings.get("font_2", DEFAULT_FONT)
+    f3 = settings.get("font_3", DEFAULT_FONT)
+
     if settings["preset"] == "weather":
-        return {"elements": [{"type": "weather", "entity_id": settings["entity_1"], "label": settings["label_1"]}]}
+        return {"elements": [{"type": "weather", "entity_id": settings["entity_1"], "label": settings["label_1"], "font": f1}]}
     if settings["preset"] == "value_graph":
         return {"elements": [{"type": "history_graph", "entity_id": settings["entity_1"],
                               "label": settings["label_1"], "unit": settings["unit_1"],
-                              "decimals": settings["decimals_1"], "hours": settings["history_hours"]}]}
-    text = lambda x, y, value, size, width, align="left": {
+                              "decimals": settings["decimals_1"], "hours": settings["history_hours"], "font": f1}]}
+
+    text = lambda x, y, value, size, width, align="left", font=DEFAULT_FONT: {
         "type": "text", "x": x, "y": y, "text": value, "size": size,
-        "max_width": width, "align": align,
+        "max_width": width, "align": align, "font": font,
     }
     line = lambda x, y, x2, y2: {"type": "line", "x": x, "y": y, "x2": x2, "y2": y2}
+
     if settings["preset"] == "single_value":
         elements = [
-            text(128, 10, _label(settings, 1), 20, 240, "center"),
+            text(128, 10, _label(settings, 1), 20, 240, "center", font=f1),
             line(8, 38, 247, 38),
-            text(128, 64, _value(settings, 1), 44, 240, "center"),
+            text(128, 64, _value(settings, 1), 44, 240, "center", font=f1),
         ]
     elif settings["preset"] in ("clock_two_values", "three_values"):
         if settings["preset"] == "three_values":
             header = _value(settings, 3)
             if not is_text_value(settings, 3):
                 header = _label(settings, 3) + ": " + header
-            elements = [text(128, 13, header, 28, 240, "center")]
+            elements = [text(128, 13, header, 28, 240, "center", font=f3)]
         else:
             elements = [
-                text(8, 13, "{{ now().strftime('%H:%M') }}", 28, 112),
-                text(248, 23, "{{ now().strftime('%d.%m.%Y') }}", 16, 122, "right"),
+                text(8, 13, "{{ now().strftime('%H:%M') }}", 28, 112, font=f_clock),
+                text(248, 23, "{{ now().strftime('%d.%m.%Y') }}", 16, 122, "right", font=f_clock),
             ]
         elements += [
             line(8, 42, 247, 42), line(128, 53, 128, 119),
-            text(8, 54, _label(settings, 1), 16, 112),
-            text(140, 54, _label(settings, 2), 16, 108),
-            text(8, 84, _value(settings, 1), 30, 112),
-            text(140, 84, _value(settings, 2), 30, 108),
+            text(8, 54, _label(settings, 1), 16, 112, font=f1),
+            text(140, 54, _label(settings, 2), 16, 108, font=f2),
+            text(8, 84, _value(settings, 1), 30, 112, font=f1),
+            text(140, 84, _value(settings, 2), 30, 108, font=f2),
         ]
     else:
-        # The existing dedicated clock renderer is used for this mode.
         raise ValueError("Use clock_layout for the clock preset")
     return {"elements": elements}
 
 
 def upgrade_saved_preset(layout: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
-    """Move the old standard clock header; preserve all custom draw layouts."""
     if settings.get("preset") != "clock_two_values":
         return layout
     current = LAYOUT_SCHEMA(preset_layout(settings))
     previous = deepcopy(current)
     previous["elements"][0]["y"] = 8
     previous["elements"][1]["y"] = 18
-    # Compare the entire normalized layout, including templates and styles.
-    # Matching just the two header coordinates would also change custom pages.
     return current if LAYOUT_SCHEMA(layout) == previous else layout
 
 
 async def async_render_layout(hass: HomeAssistant, layout: dict[str, Any]) -> RenderedFrame:
-    """Resolve templates on HA's loop and draw in the executor."""
     layout = LAYOUT_SCHEMA(deepcopy(layout))
     dynamic_data = {}
     for index, element in enumerate(layout["elements"]):

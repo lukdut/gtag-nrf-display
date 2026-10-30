@@ -71,6 +71,8 @@ GTagDisplay *instance = nullptr;
   BT_UUID_128_ENCODE(0x7a1e0017, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
 #define BT_UUID_GTAG_BATTERY_VAL \
   BT_UUID_128_ENCODE(0x7a1e0016, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
+#define BT_UUID_GTAG_BUTTON_VAL \
+  BT_UUID_128_ENCODE(0x7a1e0018, 0x6b5b, 0x4f6d, 0x8d6e, 0x0f4f47544147)
 
 #define BT_UUID_GTAG_SERVICE BT_UUID_DECLARE_128(BT_UUID_GTAG_SERVICE_VAL)
 #define BT_UUID_GTAG_LED BT_UUID_DECLARE_128(BT_UUID_GTAG_LED_VAL)
@@ -79,6 +81,7 @@ GTagDisplay *instance = nullptr;
 #define BT_UUID_GTAG_CONTROL BT_UUID_DECLARE_128(BT_UUID_GTAG_CONTROL_VAL)
 #define BT_UUID_GTAG_BATTERY BT_UUID_DECLARE_128(BT_UUID_GTAG_BATTERY_VAL)
 #define BT_UUID_GTAG_INFO BT_UUID_DECLARE_128(BT_UUID_GTAG_INFO_VAL)
+#define BT_UUID_GTAG_BUTTON BT_UUID_DECLARE_128(BT_UUID_GTAG_BUTTON_VAL)
 
 ssize_t read_info(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                   void *buf, uint16_t len, uint16_t offset) {
@@ -232,6 +235,19 @@ ssize_t write_control(struct bt_conn *, const struct bt_gatt_attr *,
   return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
 }
 
+#ifdef USE_GTAG_BUTTON
+ssize_t read_button(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                    void *buf, uint16_t len, uint16_t offset) {
+  const uint8_t value =
+      (instance != nullptr && instance->button_state()) ? 1 : 0;
+  return bt_gatt_attr_read(conn, attr, buf, len, offset, &value, sizeof(value));
+}
+#endif
+
+// Note: button_ccc_changed / connected_cb / disconnected_cb are static
+// members of GTagDisplay (see gtag_display.h) so they can touch the
+// protected fields button_notify_enabled_ and button_conn_.
+
 BT_GATT_SERVICE_DEFINE(
     gtag_service,
 
@@ -278,7 +294,19 @@ BT_GATT_SERVICE_DEFINE(
         nullptr),
     BT_GATT_CHARACTERISTIC(
         BT_UUID_GTAG_INFO, BT_GATT_CHRC_READ, BT_GATT_PERM_READ,
-        read_info, nullptr, nullptr));
+        read_info, nullptr, nullptr)
+#ifdef USE_GTAG_BUTTON
+    ,
+    BT_GATT_CHARACTERISTIC(
+        BT_UUID_GTAG_BUTTON,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ,
+        read_button,
+        nullptr,
+        nullptr),
+    BT_GATT_CCC(GTagDisplay::button_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+#endif
+);
 
 const struct bt_data ad[] = {
     BT_DATA_BYTES(
@@ -297,24 +325,55 @@ const struct bt_data sd[] = {
         sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
-void connected_cb(struct bt_conn *, uint8_t err) {
-  ESP_LOGI(TAG, "BLE connection result: 0x%02X", err);
-
-  if (instance != nullptr)
-    instance->connection_changed(err == 0);
-}
-
-void disconnected_cb(struct bt_conn *, uint8_t reason) {
-  ESP_LOGI(TAG, "BLE disconnected: reason=0x%02X", reason);
-
-  if (instance != nullptr)
-    instance->connection_changed(false);
-}
-
+// Registered once in GTagDisplay::start_radio_(); the connected/disconnected
+// function pointers are set there to the static members below.
 struct bt_conn_cb conn_callbacks = {};
-#endif
+
+#endif  // !USE_GTAG_ZIGBEE
 
 }  // namespace
+
+
+// ---------------------------------------------------------------------------
+// BLE callbacks (static members)
+// ---------------------------------------------------------------------------
+
+#ifndef USE_GTAG_ZIGBEE
+#ifdef USE_GTAG_BUTTON
+void GTagDisplay::button_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value) {
+  if (instance == nullptr)
+    return;
+  // CONFIG_BT_GATT_CLIENT pushes this callback from the BLE thread; only the
+  // boolean flag is touched here. Notifications are sent from poll_button_()
+  // in the main loop.
+  const bool enabled = (value & BT_GATT_CCC_NOTIFY) != 0;
+  instance->button_notify_enabled_ = enabled;
+  ESP_LOGI(TAG, "Button notifications %s", enabled ? "enabled" : "disabled");
+}
+#endif
+
+void GTagDisplay::connected_cb(struct bt_conn *conn, uint8_t err) {
+  ESP_LOGI(TAG, "BLE connection result: 0x%02X", err);
+
+  if (instance != nullptr) {
+    instance->connection_changed(err == 0);
+#ifdef USE_GTAG_BUTTON
+    instance->button_conn_ = (err == 0) ? conn : nullptr;
+#endif
+  }
+}
+
+void GTagDisplay::disconnected_cb(struct bt_conn *, uint8_t reason) {
+  ESP_LOGI(TAG, "BLE disconnected: reason=0x%02X", reason);
+
+  if (instance != nullptr) {
+    instance->connection_changed(false);
+#ifdef USE_GTAG_BUTTON
+    instance->button_conn_ = nullptr;
+#endif
+  }
+}
+#endif  // !USE_GTAG_ZIGBEE
 
 
 // ---------------------------------------------------------------------------
@@ -584,6 +643,63 @@ void GTagDisplay::queue_pattern_(BootPattern pattern) {
 
 
 // ---------------------------------------------------------------------------
+// Button
+// ---------------------------------------------------------------------------
+
+#ifdef USE_GTAG_BUTTON
+void GTagDisplay::poll_button_() {
+  if (this->button_pin_ >= 48)
+    return;
+
+  const auto *port = this->button_pin_ < 32 ? DEVICE_DT_GET(DT_NODELABEL(gpio0))
+                                            : DEVICE_DT_GET(DT_NODELABEL(gpio1));
+  if (!device_is_ready(port))
+    return;
+
+  // Active low: internal pull-up, pressed => 0.
+  const bool raw_pressed = gpio_pin_get(port, this->button_pin_ % 32) == 0;
+  const uint32_t now = k_uptime_get_32();
+
+  if (raw_pressed != this->button_last_raw_) {
+    this->button_last_raw_ = raw_pressed;
+    this->button_last_change_ms_ = now;
+    return;
+  }
+
+  // Debounce: only accept a stable change after 20 ms.
+  if (raw_pressed != this->button_debounced_ &&
+      (now - this->button_last_change_ms_) >= 20) {
+    this->button_debounced_ = raw_pressed;
+    if (this->button_sensor_ != nullptr) {
+      this->button_sensor_->publish_state(raw_pressed);
+    }
+#ifndef USE_GTAG_ZIGBEE
+    this->notify_button_();
+#endif
+    ESP_LOGI(TAG, "Button %s", raw_pressed ? "pressed" : "released");
+  }
+}
+
+#ifndef USE_GTAG_ZIGBEE
+void GTagDisplay::notify_button_() {
+  if (this->button_conn_ == nullptr || !this->button_notify_enabled_)
+    return;
+  // Characteristic is the 7th attribute in the service table:
+  // 0 primary, 1 LED decl, 2 LED value, 3 FRAME decl, 4 FRAME value,
+  // 5 STATUS decl, 6 STATUS value, 7 CONTROL decl, 8 CONTROL value,
+  // 9 BATTERY decl, 10 BATTERY value, 11 INFO decl, 12 INFO value,
+  // 13 BUTTON decl, 14 BUTTON value.
+  const uint8_t value = this->button_debounced_ ? 1 : 0;
+  const int err = bt_gatt_notify(this->button_conn_,
+                                 &gtag_service.attrs[14], &value, sizeof(value));
+  if (err != 0 && err != -ENOTCONN && err != -EAGAIN)
+    ESP_LOGW(TAG, "Button notify failed: %d", err);
+}
+#endif
+#endif
+
+
+// ---------------------------------------------------------------------------
 // LCD — intentionally kept equivalent to proven LCD3-DIRECT-01/v36.
 // ---------------------------------------------------------------------------
 
@@ -603,6 +719,9 @@ bool GTagDisplay::configure_pins_() {
       if (pin == this->lcd_pins_[j]) return false;
 #ifdef USE_GTAG_BATTERY
     if (pin == this->battery_pin_) return false;
+#endif
+#ifdef USE_GTAG_BUTTON
+    if (pin == this->button_pin_) return false;
 #endif
     const auto *port = pin < 32 ? DEVICE_DT_GET(DT_NODELABEL(gpio0)) : DEVICE_DT_GET(DT_NODELABEL(gpio1));
     if (!device_is_ready(port)) {
@@ -905,7 +1024,7 @@ void GTagDisplay::setup_battery_() {
   }
   unsigned input = 0;
   for (unsigned i = 0; i < 8; ++i)
-    if (ADC_PINS[i] == this->battery_pin_) input = NRF_SAADC_AIN0 + i;
+    if (ADC_PINS[i] == this->battery_pin_) input = NRK_SAADC_AIN0 + i;
   if (input == 0) {
     ESP_LOGW(TAG, "Battery pin has no SAADC input");
     return;
@@ -1016,8 +1135,8 @@ void GTagDisplay::start_radio_() {
     return;
   }
 
-  conn_callbacks.connected = connected_cb;
-  conn_callbacks.disconnected = disconnected_cb;
+  conn_callbacks.connected = &GTagDisplay::connected_cb;
+  conn_callbacks.disconnected = &GTagDisplay::disconnected_cb;
   bt_conn_cb_register(&conn_callbacks);
 
   this->bluetooth_started_ = true;
@@ -1041,6 +1160,28 @@ void GTagDisplay::setup() {
     this->mark_failed();
     return;
   }
+
+#ifdef USE_GTAG_BUTTON
+  // Configure the button pin (P0.17 by default) as active-low input.
+  if (this->button_pin_ < 48) {
+    const auto *button_port =
+        this->button_pin_ < 32 ? DEVICE_DT_GET(DT_NODELABEL(gpio0))
+                               : DEVICE_DT_GET(DT_NODELABEL(gpio1));
+    if (device_is_ready(button_port)) {
+      const int rc = gpio_pin_configure(
+          button_port, this->button_pin_ % 32,
+          GPIO_INPUT | GPIO_PULL_UP);
+      if (rc != 0) {
+        ESP_LOGW(TAG, "Button P0.%02u config failed rc=%d",
+                 unsigned(this->button_pin_), rc);
+      }
+    } else {
+      ESP_LOGW(TAG, "Button GPIO device not ready");
+    }
+  }
+  // Poll at 20 ms; loop() may be disabled, so a dedicated interval is used.
+  this->set_interval("button_poll", 20, [this]() { this->poll_button_(); });
+#endif
 
   this->queue_pattern_(this->boot_pattern_);
 
@@ -1107,7 +1248,11 @@ void GTagDisplay::dump_config() {
 #else
   ESP_LOGCONFIG(
       TAG,
-      "GTag Display; protocol-v1 codecs RAW/WHITE_RLE_V1/THREE_VALUES_V1/SIMPLE_TEMPLATES_V1; UUIDs 0011..0017");
+      "GTag Display; protocol-v1 codecs RAW/WHITE_RLE_V1/THREE_VALUES_V1/SIMPLE_TEMPLATES_V1; UUIDs 0011..0018");
+#endif
+#ifdef USE_GTAG_BUTTON
+  ESP_LOGCONFIG(TAG, "  Button: P0.%02u (active low, 20ms poll)",
+                unsigned(this->button_pin_));
 #endif
 #ifdef USE_GTAG_BATTERY
   ESP_LOGCONFIG(TAG, "  Battery: P0.%02u, 1M/1M divider, 5min, calibration=%.4f",

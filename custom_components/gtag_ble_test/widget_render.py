@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 from itertools import groupby
-
-from PIL import ImageDraw
-
-from .render import ICONS, render_layout
-
+from PIL import ImageDraw, Image
+from .render import ICONS, render_layout, FONT_DIR, DEFAULT_FONT, BIT_REVERSE
 
 def weather_icon(draw, name, points, color, width):
     if name == "sunny":
@@ -43,15 +40,12 @@ def weather_icon(draw, name, points, color, width):
         if name in ("lightning", "lightning-rainy"):
             draw.line(points(13, 13, 10, 20, 14, 20, 11, 24), fill=color, width=width)
 
-
-def text(x, y, value, size=16, width=240, align="left"):
+def text(x, y, value, size=16, width=240, align="left", font=DEFAULT_FONT):
     return {"type": "text", "x": x, "y": y, "text": str(value), "size": size,
-            "max_width": width, "align": align}
-
+            "max_width": width, "align": align, "font": font}
 
 def icon(x, y, condition, size):
     return {"type": "icon", "x": x, "y": y, "name": condition if condition in ICONS else "unknown", "size": size}
-
 
 def format_number(value, decimals="original"):
     if value is None:
@@ -60,9 +54,7 @@ def format_number(value, decimals="original"):
         return f"{round(value, int(decimals)) + 0.0:.{int(decimals)}f}"
     return f"{value:g}"
 
-
 def graph_segments(points, start, end, left=44, right=247):
-    """Keep gaps and the min/max of every pixel column, including narrow peaks."""
     segments, current = [], []
     previous = None
     for stamp, value in sorted(points, key=lambda point: point[0]):
@@ -94,10 +86,11 @@ def graph_segments(points, start, end, left=44, right=247):
         reduced.append(output)
     return reduced
 
-
 def draw_widget(image, item, data):
-    elements = [text(8, 6, data["label"], 16, 175),
-                text(248, 8, data["now"].strftime("%H:%M"), 14, 60, "right")]
+    font_name = item.get("font", DEFAULT_FONT)
+    elements = [text(8, 6, data["label"], 16, 175, font=font_name),
+                text(248, 8, data["now"].strftime("%H:%M"), 14, 60, "right", font=font_name)]
+
     if item["type"] == "weather":
         unit = data["unit"]
         value = format_number(data["temperature"], "0")
@@ -105,19 +98,19 @@ def draw_widget(image, item, data):
         elements += [icon(8, 27, data["condition"], 36),
                      text(57, 26 if apparent is not None else 29,
                           value + (f" {unit}" if data["temperature"] is not None else ""),
-                          28 if apparent is not None else 32, 147),
-                     text(248, 44, format_number(data["humidity"], "0") + ("%" if data["humidity"] is not None else ""), 14, 44, "right"),
+                          28 if apparent is not None else 32, 147, font=font_name),
+                     text(248, 44, format_number(data["humidity"], "0") + ("%" if data["humidity"] is not None else ""), 14, 44, "right", font=font_name),
                      {"type": "line", "x": 8, "y": 66, "x2": 247, "y2": 66}]
         if apparent is not None:
             elements.append(text(57, 53, "Ощущается: " + format_number(apparent, "0")
-                                 + (f" {unit}" if unit else ""), 12, 147))
+                                 + (f" {unit}" if unit else ""), 12, 147, font=font_name))
         for i in range(6):
             entry = data["forecast"][i] if i < len(data["forecast"]) else {}
             center = 24 + 42 * i
-            elements += [text(center, 73, entry["time"].strftime("%H:%M") if entry else "—", 12, 40, "center"),
+            elements += [text(center, 73, entry["time"].strftime("%H:%M") if entry else "—", 12, 40, "center", font=font_name),
                          icon(center - 10, 89, entry.get("condition"), 20),
                          text(center, 111, format_number(entry.get("temperature"), "0")
-                              + ("°" if entry.get("temperature") is not None else ""), 13, 40, "center")]
+                              + ("°" if entry.get("temperature") is not None else ""), 13, 40, "center", font=font_name)]
     else:
         unit = item["unit"].strip()
         unit = ("" if unit == "-" else unit) if unit else data["unit"]
@@ -125,23 +118,25 @@ def draw_widget(image, item, data):
         if item["decimals"] == "original" and data["value"] is not None:
             value = str(data.get("state", value))[:128]
         unit = str(unit)[:16]
-        elements.append(text(248, 27, value + (f" {unit}" if data["value"] is not None and unit else ""), 26, 240, "right"))
+        elements.append(text(248, 27, value + (f" {unit}" if data["value"] is not None and unit else ""), 26, 240, "right", font=font_name))
+
         segments = graph_segments(data["points"], data["start"].timestamp(), data["now"].timestamp())
         values = [value for segment in segments for _, value in segment]
         if values:
             low, high = min(values), max(values)
-            elements += [text(39, 57, f"{high:.4g}", 10, 38, "right"),
-                         text(39, 97, f"{low:.4g}", 10, 38, "right")]
+            elements += [text(39, 57, f"{high:.4g}", 10, 38, "right", font=font_name),
+                         text(39, 97, f"{low:.4g}", 10, 38, "right", font=font_name)]
         else:
-            elements.append(text(145, 75, "—", 20, 185, "center"))
+            elements.append(text(145, 75, "—", 20, 185, "center", font=font_name))
+
         time_format = "%H:%M" if item["hours"] < 24 else "%d.%m %H:%M"
-        elements += [text(44, 112, data["start"].strftime(time_format), 10, 100),
-                     text(247, 112, data["now"].strftime(time_format), 10, 100, "right"),
-                     text(8, 112, f"{item['hours']}h" + ("…" if data["truncated"] else ""), 9, 33)]
+        elements += [text(44, 112, data["start"].strftime(time_format), 10, 100, font=font_name),
+                     text(247, 112, data["now"].strftime(time_format), 10, 100, "right", font=font_name),
+                     text(8, 112, f"{item['hours']}h" + ("…" if data["truncated"] else ""), 9, 33, font=font_name)]
+
     frame = render_layout({"elements": elements})
-    from PIL import Image
-    from .render import BIT_REVERSE
     image.paste(Image.frombytes("1", (256, 128), frame.raw.translate(BIT_REVERSE)))
+
     if item["type"] == "history_graph":
         draw = ImageDraw.Draw(image)
         draw.line((44, 56, 44, 107, 247, 107), fill=0)

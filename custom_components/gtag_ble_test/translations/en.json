@@ -186,6 +186,9 @@
           "entity_2": "Second entity",
           "label_2": "Second label",
           "unit_2": "Second unit",
+          "font_1": "Font — first value",
+          "font_2": "Font — second value",
+	  "font_3": "Font — top value",
           "decimals_1": "Decimal places — first value",
           "decimals_2": "Decimal places — second value",
           "history_hours": "History period, hours"
@@ -215,6 +218,7 @@
         "description": "Choose a layout. You can preview it before applying.",
         "data": {
           "preset": "Layout",
+	  "font_clock": "Font for clock and date",
           "update_interval": "Minimum update interval",
           "stale_after": "Show stale-data icon after"
         },
@@ -314,6 +318,9 @@
           "label_2": "Bottom right — label",
           "unit_2": "Bottom right — unit",
           "decimals_2": "Bottom right — decimal places",
+          "font_1": "Font — first value",
+          "font_2": "Font — second value",
+	  "font_3": "Font — top value",
           "text_2": "Bottom right — text"
         },
         "data_description": {
@@ -369,6 +376,10 @@
         "three_values": "🌿 Three values or text"
       }
     },
+    "font": {
+      "options": {}
+    },
+
     "render_notice": {
       "options": {
         "bitmap_fallback": "Rendered in Home Assistant"

@@ -173,5 +173,5 @@ class RefreshDisplayButton(GTagEntity, ButtonEntity):
     def __init__(self, display):
         super().__init__(display, "refresh")
 
-    async def async_press(self):
+    async def async_press(self) -> None:
         await self.display.async_refresh()

@@ -12,7 +12,7 @@ from esphome.core import CORE
 from esphome.components.zephyr import zephyr_add_overlay, zephyr_add_prj_conf
 from esphome.components.nrf52.const import AIN_TO_GPIO
 from esphome.components.nrf52.gpio import validate_gpio_pin
-from esphome.components import sensor
+from esphome.components import binary_sensor, sensor
 
 DEPENDENCIES = []
 CONFLICTS_WITH = [
@@ -29,6 +29,8 @@ CONF_BOOT_TEST_PATTERN = "boot_test_pattern"
 CONF_BATTERY_VOLTAGE = "battery_voltage"
 CONF_CALIBRATION = "calibration"
 CONF_TRANSPORT = "transport"
+CONF_BUTTON_PIN = "button_pin"
+CONF_BUTTON_SENSOR = "button_sensor"
 LCD_PINS = ("dio_pin", "clk_pin", "cs_pin", "reset_pin")
 
 ns = cg.esphome_ns.namespace("gtag_display")
@@ -84,11 +86,19 @@ def battery_pin(value):
     return pins.internal_gpio_input_pin_number(number)
 
 
+def button_pin(value):
+    """Active-low button on nRF52, internal pull-up configured in C++."""
+    number = gpio_number(value)
+    return number
+
+
 def validate_pin_assignment(config):
     used = {}
     assignments = [(key, config[key], [key]) for key in LCD_PINS]
     if config[CONF_BATTERY_VOLTAGE]["enabled"]:
         assignments.append(("battery_voltage.pin", config[CONF_BATTERY_VOLTAGE]["pin"], [CONF_BATTERY_VOLTAGE, "pin"]))
+    if CONF_BUTTON_PIN in config:
+        assignments.append((CONF_BUTTON_PIN, config[CONF_BUTTON_PIN], [CONF_BUTTON_PIN]))
     for name, number, path in assignments:
         if isinstance(number, dict):
             number = number["number"]
@@ -150,6 +160,8 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.Optional(CONF_TX_POWER, default=0): cv.one_of(0, 4, 8, int=True),
     cv.Optional(CONF_ADVERTISING_INTERVAL, default="1s"): advertising_interval,
     cv.Optional(CONF_BOOT_TEST_PATTERN, default="logo"): cv.enum(BOOT_PATTERNS, lower=True),
+    cv.Optional(CONF_BUTTON_PIN): button_pin,
+    cv.Optional(CONF_BUTTON_SENSOR): cv.use_id(binary_sensor.BinarySensor),
     **{cv.Required(key): lcd_pin
        for key in LCD_PINS},
     # B+ -- 1M -- ADC GPIO -- 1M -- GND; 100nF from ADC GPIO to GND.
@@ -168,6 +180,8 @@ def validate_transport(config):
             raise cv.Invalid("transport: wifi requires ESP32 or ESP8266, wifi and api")
         if "zigbee_id" in config or "zigbee" in full:
             raise cv.Invalid("The Wi-Fi profile cannot include Zigbee")
+        if CONF_BUTTON_PIN in config or CONF_BUTTON_SENSOR in config:
+            raise cv.Invalid("Button is only supported by the nRF52 BLE/Zigbee profiles")
         return config
     if not CORE.is_nrf52:
         raise cv.Invalid("BLE and Zigbee profiles require nRF52; use transport: wifi for ESP32/ESP8266")
@@ -180,6 +194,8 @@ def validate_transport(config):
         raise cv.Invalid("Use transport: zigbee with the zigbee component; BLE and Zigbee are separate profiles")
     if config[CONF_TRANSPORT] == "ble" and "zigbee_id" in config:
         raise cv.Invalid("zigbee_id is only used with transport: zigbee")
+    if CONF_BUTTON_SENSOR in config and CONF_BUTTON_PIN not in config:
+        raise cv.Invalid("button_sensor requires button_pin")
     return config
 
 
@@ -266,6 +282,11 @@ async def to_code(config):
     cg.add(var.set_boot_pattern(config[CONF_BOOT_TEST_PATTERN]))
     for key in LCD_PINS:
         cg.add(getattr(var, f"set_{key}")(config[key]))
+    if CONF_BUTTON_PIN in config:
+        cg.add_define("USE_GTAG_BUTTON")
+        cg.add(var.set_button_pin(config[CONF_BUTTON_PIN]))
+        if CONF_BUTTON_SENSOR in config:
+            cg.add(var.set_button_sensor(await cg.get_variable(config[CONF_BUTTON_SENSOR])))
     if config[CONF_BATTERY_VOLTAGE]["enabled"]:
         cg.add_define("USE_GTAG_BATTERY")
         zephyr_add_overlay('&adc { status = "okay"; };')
